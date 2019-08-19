@@ -1,0 +1,136 @@
+---
+# Example T9 config file
+# `cp example-config.yaml config.yaml` to get started
+# Keep this file unchanged for a constant reference
+# Delete this comment in your conifg.yaml
+
+# You will need to update operational configs like hosts, ports, credentials,
+# and filesystem paths, but everything else should represent a working default.
+
+
+# required connection info
+host: '127.0.0.1'
+port: 6667
+nick: 'T9'
+user: 'T9'
+vhost: 'dot'
+realname: 'T9 Anything Bot'
+
+# optional connection password (most servers dont use these)
+#password: ''
+
+# required name of the local docker container to run $exec on
+container_name: 't9-exec'
+
+# required- log output gets sent to this channel
+# must start with #{nick}-
+console_channel: '#T9-console'
+
+# optional logging level name to use for the irc handler
+# defaults to info, set to False to disable irc logging
+console_channel_level: INFO
+
+# optional initial list of channels
+# invited channels will be persisted in the db if configured
+channels:
+  - '#general'
+  - '#T9-playground'
+
+# required string to return for help commands
+help: "Call your operator!"
+
+# required leader characters for various purposes, can specify multiple
+# equivalent options
+primitive_leaders: '$'
+command_leaders: '$'
+user_leaders: '!.;'
+
+# optional pastebin function that accepts a single string as an argument
+# and returns a web URL showing the full string ideally in monospace font
+# This is used to capture stderr output from user functions. If this config
+# is not set only the final line of stderr output will be logged
+pastebin_function: my_paste.paster_module.paste_text_function
+
+# optional configs to enable accepting files over DCC and making them
+# available on the container
+dcc_max_size: 10485760
+dcc_dir: '/media/t9-home-mnt/user'
+
+# optional secure base directory configs to enable write-locking commands
+# works together with secrets manager
+secure_base: '/home/user/secure'
+rel_secure_base: 'secure'
+
+# db is optional but some features will not work without one
+# designed for Postgres and psycopg2
+db:
+  user: 't9'
+  dbname: 't9'
+  password: 'hunter2'
+  host: '127.0.0.1'
+
+# optionally enable passing in T9_DB_ environment variables to $exec calls
+user_db:
+  user: 't9_exec'
+  dbname: 'some_data'
+  host: 'postgres'
+  port: 5432
+
+
+# security options - all optional configs
+
+# completely ignore all messages from these nicknames
+ignore:
+  - 'spambot'
+  - 'spamperson'
+
+# whitelist of nicknames allowed to invite
+# set to False to disable invites entirely
+#invite_allowed: False
+
+# open to everyone with empty whitelist (or no config)
+invite_allowed: []
+
+# only allow function definitions in T9 channels
+define_functions_in_t9_channels_only: False
+
+
+# exec limits - all optional configs
+
+# unchangeable maximum exec time for user functions
+function_exec_time: '10s'
+
+# default max exec time for the $exec command, changeable with $exec -t
+default_exec_time: '10s'
+
+# maximum acceptable value for $exec -t
+max_exec_time: '2h'
+
+# sets this value to LC_ALL and LANG for $exec runs
+exec_locale: 'en_US.UTF-8'
+
+# enable extra python utf8 env vars for $exec runs
+exec_python_utf8: True
+
+# maxmimum user function call depth
+stack_limit: 4
+
+
+# optional logging config
+# standard python logging dict config
+# https://docs.python.org/3/library/logging.config.html#logging-config-dictschema
+
+logging:
+  version: 1
+  formatters:
+    console:
+      format: '[%(asctime)s] %(name)s %(levelname)s : %(message)s'
+  handlers:
+    console:
+      class: logging.StreamHandler
+      level: DEBUG
+      formatter: console
+  loggers:
+    T9:  # logger name must match the configured `nick`
+      level: DEBUG
+      handlers: [console]
