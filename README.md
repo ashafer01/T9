@@ -25,6 +25,8 @@ exploits).
 
 Check the example config for more information.
 
+Documentation is available in the [GitHub wiki](https://github.com/ashafer01/T9/wiki).
+
 To install from source:
 
 ```
