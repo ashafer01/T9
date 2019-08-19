@@ -45,3 +45,5 @@ python3 -m t9 ~/some/dir/t9.yaml
 
 Finally you can set the `T9_CONFIG_FILE` environment variable to the path to
 a config file.
+
+Originally built on Python 3.7.3
