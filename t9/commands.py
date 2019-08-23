@@ -24,8 +24,9 @@ class ExclusiveContainerControl(object):
 class Commands(InterfaceComponent):
     def __init__(self, config, logger, db, functions, sync_lock, send_line):
         InterfaceComponent.__init__(self, config, logger, send_line)
-        self.functions = functions
         self.db = db
+        self.functions = functions
+        self.exclusive_container_control = ExclusiveContainerControl(logger, sync_lock, functions.exec_counter)
 
     def channel_command_candidate(self, line):
         return line.args[0][0] == '#' and line.text[0] in self.config['command_leaders']

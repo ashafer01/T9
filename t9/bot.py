@@ -2,19 +2,14 @@ import asyncio
 import logging
 import os.path
 import psycopg2
-import re
 import shlex
 import traceback
-from collections import deque
-from datetime import datetime
 
 from .commands import Commands
 from .irc import irc_reader, EOL, IRCHandler
 from .exceptions import *
 from .user_functions import UserFunctions
 from .utils import parse_timelimit
-
-env_var_name_re = re.compile('^[a-zA-Z][a-zA-Z0-9_]{3,31}$')
 
 
 async def bot(config):
