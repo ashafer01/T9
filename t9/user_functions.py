@@ -101,9 +101,7 @@ class UserFunctions(InterfaceComponent):
         self.function_names.sort(key=lambda e: len(e), reverse=True)
 
     def match_function(self, user_string):
-        run_func = False
         for func_name in self.function_names:
-            run_func = False
             if func_name[0] == '!' and user_string[0] in self.config['user_leaders']:
                 user_string = '!' + user_string[1:]
             if func_name[-1] == '$':
@@ -117,9 +115,6 @@ class UserFunctions(InterfaceComponent):
                     return func_name, user_string
             elif func_name[-1] == '?':
                 if user_string == func_name:
-                    return func_name, ''
-            elif user_string[-1] == '?':
-                if user_string[:-1] == func_name:
                     return func_name, ''
             else:
                 func_prefix = func_name + ' '
@@ -178,6 +173,7 @@ class UserFunctions(InterfaceComponent):
             parent_func_name = func_def['func']
             parent_func_data = func_def['func_data']
             stack.appendleft((func_name, parent_func_data))
+            self.logger.debug(f'Running parent function "{parent_func_name}" for function "{func_name}"')
             await self.run_function(line, parent_func_name, func_input, stack)
 
     async def run_primitive(self, line, cmd, args, func_input, stack):

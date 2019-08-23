@@ -24,6 +24,7 @@ async def bot(config):
     config.setdefault('ignore', [])
     config['ignore'] = [nick.lower() for nick in config['ignore']]
 
+    config.setdefault('channels', [])
     console_channel = config.setdefault('console_channel', '#{nick}-console'.format(**config))
     if console_channel not in config['channels']:
         config['channels'].append(console_channel)
