@@ -136,7 +136,7 @@ async def bot(config):
                         config['dcc_max_size']
                         config['dcc_dir']
                     except KeyError:
-                        self.logger.error('dcc_dir/dcc_max_size config required for DCC')
+                        logger.error('dcc_dir/dcc_max_size config required for DCC')
                         return
                     dcc_cmd = ctcp_args[1]
                     if dcc_cmd == 'SEND':
