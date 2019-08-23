@@ -12,6 +12,7 @@ class UserFunctions(InterfaceComponent):
     def __init__(self, config, logger, send_line):
         InterfaceComponent.__init__(self, config, logger, send_line)
         self.functions = {}
+        self.function_names = []
         self.exec_counter = asyncio.Queue()
         self.db = None
 
@@ -34,6 +35,7 @@ class UserFunctions(InterfaceComponent):
                     'setter_nick': setter_nick,
                     'set_time': set_time,
                 }
+            self.update_sorted_names()
 
     def persist_function_def(self, new_func_name, new_parent_func, new_func_data, nick):
         if self.db:
@@ -89,15 +91,18 @@ class UserFunctions(InterfaceComponent):
                 'set_time': datetime.now(),
             }
             self.functions[new_func_name] = new_func_def
+            self.update_sorted_names()
             return new_func_def
         else:
             return False
 
+    def update_sorted_names(self):
+        self.function_names = list(self.functions.keys())
+        self.function_names.sort(key=lambda e: len(e), reverse=True)
+
     def match_function(self, user_string):
-        func_names = list(self.functions.keys())
-        func_names.sort(key=lambda e: len(e), reverse=True)
         run_func = False
-        for func_name in func_names:
+        for func_name in self.function_names:
             run_func = False
             if func_name[0] == '!' and user_string[0] in self.config['user_leaders']:
                 user_string = '!' + user_string[1:]
