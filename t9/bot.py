@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os.path
 import psycopg2
+import signal
 import shlex
 import traceback
 
@@ -40,6 +41,11 @@ async def bot(config):
     def send_line(line):
         writer.write(line.encode() + EOL)
         logger.info(f'=> {line}')
+
+    def sigint_handler():
+        send_line('QUIT :Stop Requested')
+
+    asyncio.get_running_loop().add_signal_handler(signal.SIGINT, sigint_handler)
 
     # set up resources
 
