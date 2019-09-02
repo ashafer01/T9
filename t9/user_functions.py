@@ -106,29 +106,29 @@ class UserFunctions(InterfaceComponent):
                 user_string = '!' + user_string[1:]
             if func_name[-1] == '$':
                 if user_string == func_name[:-1]:
-                    return func_name, ''
+                    return func_name, '', None
             elif len(func_name) >= 3 and func_name[0] == '/' and func_name[-1] == '/':
                 trigger_re = func_name[1:-1]
                 trigger_mo = re.search(trigger_re, user_string)
                 if trigger_mo:
-                    line.trigger_match = trigger_mo
-                    return func_name, user_string
+                    return func_name, user_string, trigger_mo
             elif func_name[-1] == '?':
                 if user_string == func_name:
-                    return func_name, ''
+                    return func_name, '', None
             else:
                 func_prefix = func_name + ' '
                 if user_string.startswith(func_prefix):
-                    return func_name, user_string[len(func_prefix):]
+                    return func_name, user_string[len(func_prefix):], None
                 elif user_string == func_name:
-                    return func_name, ''
+                    return func_name, '', None
         return False
 
     async def run_match_function(self, line, user_string):
         m = self.match_function(user_string)
         if m:
-            func_name, param = m
-            self.logger.info(f'Function {func_name} triggered by line <= {line}')
+            func_name, param, regex_match = m
+            line.trigger_match = regex_match
+            self.logger.info(f'Function "{func_name}" triggered by line <= {line}')
             await self.run_function(line, func_name, param)
         else:
             self.logger.debug('No matched function')
