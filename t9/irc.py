@@ -18,7 +18,6 @@ class Line(object):
         self.raw = None
         self.bytes = None
         self.handle = HandleInfo()
-        self.trigger_match = None
 
     @classmethod
     def parse(cls, bytes_line, encoding='utf-8'):

@@ -127,9 +127,8 @@ class UserFunctions(InterfaceComponent):
         m = self.match_function(user_string)
         if m:
             func_name, param, regex_match = m
-            line.trigger_match = regex_match
             self.logger.info(f'Function "{func_name}" triggered by line <= {line}')
-            await self.run_function(line, func_name, param)
+            await self.run_function(line, func_name, param, regex_match)
         else:
             self.logger.debug('No matched function')
 
@@ -156,7 +155,7 @@ class UserFunctions(InterfaceComponent):
             del self.functions[func_name]
             respond(f'Deleted function "{func_name}"')
 
-    async def run_function(self, line, func_name, func_input='', stack=None):
+    async def run_function(self, line, func_name, func_input='', regex_match=None, stack=None):
         """Run a user-defined function"""
         if stack is None:
             stack = deque()
@@ -167,25 +166,25 @@ class UserFunctions(InterfaceComponent):
             return
         if func_name[0] in self.config['primitive_leaders']:
             func_data = stack[0][1]
-            await self.run_primitive(line, func_name[1:], func_data, func_input, stack)
+            await self.run_primitive(line, func_name[1:], func_data, func_input, regex_match, stack)
         else:
             func_def = self.functions[func_name]
             parent_func_name = func_def['func']
             parent_func_data = func_def['func_data']
             stack.appendleft((func_name, parent_func_data))
             self.logger.debug(f'Running parent function "{parent_func_name}" for function "{func_name}"')
-            await self.run_function(line, parent_func_name, func_input, stack)
+            await self.run_function(line, parent_func_name, func_input, regex_match, stack)
 
-    async def run_primitive(self, line, cmd, args, func_input, stack):
+    async def run_primitive(self, line, cmd, args, func_input, regex_match, stack):
         """This defines the names of built-in primitive functions"""
         if cmd == 'exec':
-            await self.exec(line, args, func_input, stack)
+            await self.exec(line, args, func_input, stack, regex_match=regex_match)
         elif cmd == 'echo':
             self.respond(line)(args.rstrip())
         else:
             raise BuiltinNotFoundError(cmd)
 
-    async def exec(self, line, func_data, param='', stack=None, timelimit=None):
+    async def exec(self, line, func_data, param='', stack=None, timelimit=None, regex_match=None):
         """The main thing T9 does - exec user input on a container"""
         if timelimit is None:
             timelimit = self.config['function_exec_time']
@@ -203,11 +202,11 @@ class UserFunctions(InterfaceComponent):
         else:
             called_as = ''
 
-        if line.trigger_match:
-            extra_env.extend(['-e', f"T9_MATCH_0={line.trigger_match.group(0)}"])
-            for i, group_str in enumerate(line.trigger_match.groups(default='')):
+        if regex_match:
+            extra_env.extend(['-e', f"T9_MATCH_0={regex_match.group(0)}"])
+            for i, group_str in enumerate(regex_match.groups(default='')):
                 extra_env.extend(['-e', f"T9_MATCH_{i+1}={group_str}"])
-            for name, group_str in line.trigger_match.groupdict(default='').items():
+            for name, group_str in regex_match.groupdict(default='').items():
                 extra_env.extend(['-e', f"T9_MATCH_{name}={group_str}"])
 
         if self.config['exec_python_utf8']:
