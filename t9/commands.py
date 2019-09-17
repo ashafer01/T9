@@ -22,20 +22,16 @@ class ExclusiveContainerControl(object):
 
 
 class Commands(InterfaceComponent):
-    def __init__(self, config, logger, db, functions, sync_lock, send_line):
-        InterfaceComponent.__init__(self, config, logger, send_line)
+    def __init__(self, config, send_line, db, functions, sync_lock):
+        InterfaceComponent.__init__(self, config, send_line)
         self.db = db
         self.functions = functions
-        self.exclusive_container_control = ExclusiveContainerControl(logger, sync_lock, functions.exec_counter)
+        self.exclusive_container_control = ExclusiveContainerControl(self.logger, sync_lock, functions.exec_counter)
 
-    def channel_command_candidate(self, line):
-        return line.args[0][0] == '#' and line.text[0] in self.config['command_leaders']
-
-    def pm_command_candidate(self, line):
-        return line.args[0][0] != '#' and line.text[0] in self.config['command_leaders']
+    def command_candidate(self, line):
+        return line.text[0] in self.config['command_leaders']
 
     def _find_cmd_func(self, func_prefix, cmd):
-        cmd_func = None
         for cmd_suffix in (cmd.lower(), cmd.lower().replace('-', '_')):
             try:
                 return getattr(self, func_prefix + cmd_suffix)

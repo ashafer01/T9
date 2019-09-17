@@ -98,7 +98,7 @@ async def line_reader(reader, read_buffer=512):
             yield raw_line
 
 
-async def irc_reader(reader, encoding='utf-8', read_buffer=512):
+async def irc_reader(reader, read_buffer=512):
     async for bytes_line in line_reader(reader, read_buffer):
         line_obj = Line.parse(bytes_line)
         yield line_obj

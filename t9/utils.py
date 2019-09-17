@@ -1,3 +1,4 @@
+import logging
 import re
 from importlib import import_module
 
@@ -21,9 +22,9 @@ def parse_timelimit(time_arg):
 
 
 class InterfaceComponent(object):
-    def __init__(self, config, logger, send_line):
+    def __init__(self, config, send_line):
         self.config = config
-        self.logger = logger
+        self.logger = logging.getLogger(config['nick'])
         self.send_line = send_line
 
         self._t9_channel_prefix = '#' + config['nick'].lower() + '-'

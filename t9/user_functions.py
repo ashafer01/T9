@@ -9,8 +9,8 @@ from .utils import InterfaceComponent, env_var_name_re
 
 
 class UserFunctions(InterfaceComponent):
-    def __init__(self, config, logger, send_line):
-        InterfaceComponent.__init__(self, config, logger, send_line)
+    def __init__(self, config, send_line):
+        InterfaceComponent.__init__(self, config, send_line)
         self.functions = {}
         self.function_names = []
         self.exec_counter = asyncio.Queue()
@@ -40,29 +40,19 @@ class UserFunctions(InterfaceComponent):
     def persist_function_def(self, new_func_name, new_parent_func, new_func_data, nick):
         if self.db:
             with self.db.cursor() as dbc:
-                dbc.execute('UPDATE funcs SET '
-                              'parent_func=%s, '
-                              'func_data=%s, '
-                              'setter_nick=%s, '
-                              'set_time=now() '
-                            'WHERE func_name=%s', (
-                              new_parent_func,
-                              new_func_data,
-                              nick,
-                              new_func_name,
-                            ))
-                if dbc.rowcount == 0:
-                    dbc.execute('INSERT INTO funcs ('
-                                  'func_name, '
-                                  'parent_func, '
-                                  'func_data, '
-                                  'setter_nick ) VALUES '
-                                '(%s, %s, %s, %s)', (
-                                  new_func_name,
-                                  new_parent_func,
-                                  new_func_data,
-                                  nick,
-                                ))
+                dbc.execute('INSERT INTO funcs (func_name, parent_func, func_data, setter_nick) '
+                            'VALUES (%(func_name)s, %(parent_func)s, %(func_data)s, %(nick)s) '
+                            'ON CONFLICT ON CONSTRAINT funcs_pkey DO UPDATE SET '
+                              'parent_func=%(parent_func)s, '
+                              'func_data=%(func_data)s, '
+                              'setter_nick=%(nick)s, '
+                              'set_time=now()',
+                            {
+                                'func_name': new_func_name,
+                                'parent_func': new_parent_func,
+                                'func_data': new_func_data,
+                                'nick': nick,
+                            })
                 self.db.commit()
 
     def try_define_function(self, line):

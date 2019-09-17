@@ -1,14 +1,13 @@
 import asyncio
 import logging
-import os.path
 import psycopg2
 import signal
-import shlex
 import traceback
 
 from .commands import Commands
-from .irc import irc_reader, EOL, IRCHandler
+from .ctcp import CTCP
 from .exceptions import *
+from .irc import irc_reader, EOL, IRCHandler
 from .user_functions import UserFunctions
 from .utils import parse_timelimit
 
@@ -38,18 +37,13 @@ async def bot(config):
 
     reader, writer = await asyncio.open_connection(config['host'], config['port'])
 
-    def send_line(line):
+    def send_line(line: str):
         writer.write(line.encode() + EOL)
         logger.info(f'=> {line}')
 
-    def sigint_handler():
-        send_line('QUIT :Stop Requested')
-
-    asyncio.get_running_loop().add_signal_handler(signal.SIGINT, sigint_handler)
-
     # set up resources
 
-    functions = UserFunctions(config, logger, send_line)
+    functions = UserFunctions(config, send_line)
 
     if 'db' in config:
         db = psycopg2.connect(
@@ -69,8 +63,64 @@ async def bot(config):
     else:
         db = None
 
+    handshake_done = False
     sync_lock = asyncio.Lock()
-    commands = Commands(config, logger, db, functions, sync_lock, send_line)
+    commands = Commands(config, send_line, db, functions, sync_lock)
+    ctcp = CTCP(config, send_line)
+
+    # functions
+
+    def is_ignored(line):
+        return line.handle.nick.lower() in config['ignore']
+
+    async def handle_invite(line):
+        inv_channel = line.text
+
+        # gate the invite
+        invite_allowed = config.get('invite_allowed')
+        if invite_allowed is False:
+            logger.info('Invites are disabled')
+            return
+        elif not invite_allowed:
+            # invites open to everyone except global ignores
+            if is_ignored(line):
+                logger.debug(f'Ignoring {line.handle.nick} (invite)')
+                return
+        else:
+            # invites restricted
+            if line.handle.nick not in invite_allowed:
+                logger.warning(f'Invitation to {inv_channel} from {line.handle.nick} not allowed')
+                return
+
+        # join the channel
+        if inv_channel not in config['channels']:
+            if db:
+                with db.cursor() as dbc:
+                    dbc.execute('INSERT INTO chans (channel) VALUES (%s)', (inv_channel,))
+                    db.commit()
+            config['channels'].append(inv_channel)
+            send_line(f'JOIN {line.text}')
+        else:
+            logger.info(f'Already joined to {inv_channel} ignoring invite')
+
+    def join_channels():
+        for channel in config['channels']:
+            send_line(f'JOIN {channel}')
+
+    def set_up_irc_logging():
+        if handshake_done:
+            logger.warning('Multiple calls to set_up_irc_logging()')
+            return
+
+        cfg_console_level = config.get('console_channel_level', 'INFO')
+        if cfg_console_level:
+            level = getattr(logging, cfg_console_level.upper())
+            handler = IRCHandler(writer, console_channel)
+            handler.setLevel(level)
+            logger.addHandler(handler)
+            logger.info('IRC logging online')
+        else:
+            logger.info('IRC logging disabled, see `console_channel_level` config option')
 
     async def line_task(line):
         logger.debug(f'<= {line}')
@@ -80,113 +130,22 @@ async def bot(config):
             send_line(f'PONG :{line.text}')
         elif line.cmd == 'MODE':
             if line.args == [config['nick']] and not handshake_done:
-                # after the first self-usermode that we get, join channels and
-                # mark the handshake complete; this causes lines to begin
-                # asyncronous handling
-                for channel in config['channels']:
-                    send_line(f'JOIN {channel}')
-
-                cfg_console_level = config.get('console_channel_level', 'INFO')
-                if cfg_console_level:
-                    level = getattr(logging, cfg_console_level.upper())
-                    handler = IRCHandler(writer, console_channel)
-                    handler.setLevel(level)
-                    logger.addHandler(handler)
-                    logger.info('IRC logging online')
-                else:
-                    logger.info('IRC logging disabled, see `console_channel_level` config option')
-
+                # finish the handshake after the first self-usermode that we get
+                join_channels()
+                set_up_irc_logging()
                 return True  # indicate handshake is done
         elif line.cmd == 'INVITE':
-            inv_channel = line.text
-            invite_allowed = config.get('invite_allowed')
-            if invite_allowed is False:
-                logger.info('Invites are disabled')
-                return
-            elif not invite_allowed:
-                # invites open to everyone except global ignores
-                if line.handle.nick.lower() in config['ignore']:
-                    logger.debug(f'Ignoring {line.handle.nick} (invite)')
-                    return
-            else:
-                # invites restricted
-                if line.handle.nick not in invite_allowed:
-                    logger.warn(f'Invitation to {inv_channel} from {line.handle.nick} not allowed')
-                    return
-            if inv_channel not in config['channels']:
-                if db:
-                    with db.cursor() as dbc:
-                        dbc.execute('INSERT INTO chans (channel) VALUES (%s)',
-                                    (inv_channel,))
-                        db.commit()
-                config['channels'].append(inv_channel)
-                send_line(f'JOIN {line.text}')
-            else:
-                logger.info(f'Already joined to {inv_channel} ignoring invite')
+            await handle_invite(line)
         elif line.cmd == 'PRIVMSG':
-            if line.handle.nick.lower() in config['ignore']:
+            if is_ignored(line):
                 logger.debug(f'Ignoring {line.handle.nick} (privmsg)')
                 return
-            if commands.channel_command_candidate(line):
+
+            if commands.command_candidate(line):
                 await commands.handle_line(line)
-            elif line.text[0] == '\x01':
-                # got CTCP
-                ctcp_args = shlex.split(line.text.strip('\x01'))
-                ctcp_cmd = ctcp_args[0].upper()
-                if ctcp_cmd == 'DCC':
-                    try:
-                        config['dcc_max_size']
-                        config['dcc_dir']
-                    except KeyError:
-                        logger.error('dcc_dir/dcc_max_size config required for DCC')
-                        return
-                    dcc_cmd = ctcp_args[1]
-                    if dcc_cmd == 'SEND':
-                        # got DCC file transfer request
-                        def pm_status(msg):
-                            send_line(f'PRIVMSG {line.handle.nick} :{msg}')
-
-                        dcc_file_size = int(ctcp_args[5])
-                        if dcc_file_size > config['dcc_max_size']:
-                            pm_status(f'Ignoring DCC SEND from {line.handle.nick} because file is over size limit {config["dcc_max_size"]}')
-                        else:
-                            dcc_file = os.path.basename(ctcp_args[2])
-                            dcc_port = int(ctcp_args[4])
-
-                            dcc_ip_int = int(ctcp_args[3])
-                            dcc_ip_bytes = dcc_ip_int.to_bytes(4, byteorder='big')
-                            dcc_ip = '.'.join([str(int(b)) for b in dcc_ip_bytes])
-
-                            pm_status(f'Receiving DCC SEND of {dcc_file} from {line.handle.nick} on {dcc_ip}:{dcc_port}')
-
-                            dcc_reader, dcc_writer = await asyncio.open_connection(dcc_ip, dcc_port, limit=dcc_file_size)
-                            with open(os.path.join(config['dcc_dir'], dcc_file), 'wb') as f:
-                                received_size = 0
-                                while not dcc_reader.at_eof():
-                                    dcc_file_contents = await dcc_reader.read(dcc_file_size)
-                                    received_size += len(dcc_file_contents)
-                                    if received_size > dcc_file_size + 1:
-                                        pm_status('DCC SEND from {line.handle.nick} on {dcc_ip}:{dcc_port} truncated due to exceeding declared size')
-                                        break
-                                    f.write(dcc_file_contents)
-                            dcc_writer.close()
-
-                            pm_status(f'DCC SEND of {dcc_file} from {line.handle.nick} completed successfully')
-                    else:
-                        logger.debug(f'Unhandled DCC command {dcc_cmd}')
-                else:
-                    logger.debug(f'Unhandled CTCP command {ctcp_cmd}')
-            elif commands.pm_command_candidate(line):
-                logger.debug(f'Trying PM command from {line.handle.nick}')
-                await commands.handle_line(line)
-            elif line.args[0][0] != '#':
-                logger.debug(f'Ignoring PM from {line.handle.nick}')
-                return
+            elif ctcp.ctcp_candidate(line):
+                await ctcp.handle_line(line)
             else:
-                # check if the line contains a function definition
-                # define it if it does
-                # if it doesnt, check if it contains a function trigger
-                # run the function if it does
                 await functions.handle_line(line)
 
     async def safe_await(aw, cls=Exception):
@@ -200,6 +159,8 @@ async def bot(config):
             logger.debug('\n' + ''.join(traceback.format_tb(e.__traceback__)))
             await writer.drain()
 
+    # begin IRC handshake
+
     try:
         send_line('PASS {password}'.format(**config))
     except KeyError:
@@ -209,14 +170,22 @@ async def bot(config):
 
     await writer.drain()
 
-    handshake_done = False
-    async for line in irc_reader(reader):
+    def sigint_handler():
+        send_line('QUIT :Stop Requested')
+
+    asyncio.get_running_loop().add_signal_handler(signal.SIGINT, sigint_handler)
+
+    # start handling lines from the server
+
+    async for line_obj in irc_reader(reader):
         # allow commands to prevent other lines from running concurrently
         await sync_lock.acquire()
         sync_lock.release()
 
-        line_coro = safe_await(line_task(line))
+        line_coro = safe_await(line_task(line_obj))
         if not handshake_done:
+            # handle lines synchronously until the handshake is complete
             handshake_done = await line_coro
         else:
-            task = asyncio.create_task(line_coro)
+            # handle lines asynchronously
+            asyncio.create_task(line_coro)
