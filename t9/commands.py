@@ -32,11 +32,11 @@ class Commands(InterfaceComponent):
         return line.text[0] in self.config['command_leaders']
 
     def _find_cmd_func(self, func_prefix, cmd):
-        for cmd_suffix in (cmd.lower(), cmd.lower().replace('-', '_')):
-            try:
-                return getattr(self, func_prefix + cmd_suffix)
-            except AttributeError:
-                pass
+        cmd_suffix = cmd.lower().replace('-', '_')
+        try:
+            return getattr(self, func_prefix + cmd_suffix)
+        except AttributeError:
+            pass
 
     async def _find_run_cmd(self, func_prefix, line, cmd, args):
         cmd_func = self._find_cmd_func(func_prefix, cmd)
