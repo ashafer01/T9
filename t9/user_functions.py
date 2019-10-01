@@ -129,20 +129,23 @@ class UserFunctions(InterfaceComponent):
             await self.run_match_function(line, line.text)
 
     def delete_function(self, func_name, respond=None):
+        # TODO use match_function on func_name
         if respond is None:
             respond = self.logger.info
         if self.db:
             with self.db.cursor() as dbc:
                 dbc.execute('DELETE FROM funcs WHERE func_name=%s', (func_name,))
                 if dbc.rowcount > 0:
-                    respond(f'Deleted function "{func_name}"')
                     del self.functions[func_name]
+                    self.update_sorted_names()
+                    respond(f'Deleted function "{func_name}"')
                 else:
                     respond(f'No function found with name "{func_name}"')
                 self.db.commit()
         else:
             self.logger.debug('No database for $rm')
             del self.functions[func_name]
+            self.update_sorted_names()
             respond(f'Deleted function "{func_name}"')
 
     async def run_function(self, line, func_name, func_input='', regex_match=None, stack=None):
