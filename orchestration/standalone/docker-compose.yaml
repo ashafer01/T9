@@ -44,5 +44,3 @@ services:
     restart: unless-stopped
     external_links:
       - postgres
-    extra_hosts:
-      - "irc:127.0.0.1"
