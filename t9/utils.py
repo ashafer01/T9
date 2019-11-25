@@ -21,10 +21,15 @@ def parse_timelimit(time_arg):
     return timelimit
 
 
-class InterfaceComponent(object):
-    def __init__(self, config, send_line):
+class Component(object):
+    def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(config['nick'])
+
+
+class InterfaceComponent(Component):
+    def __init__(self, config, send_line):
+        Component.__init__(self, config)
         self.send_line = send_line
 
         self._t9_channel_prefix = '#' + config['nick'].lower() + '-'
@@ -48,10 +53,11 @@ class InterfaceComponent(object):
         return channel.lower().startswith(self._t9_channel_prefix)
 
     def user_log(self, line):
-        if line.args[0].startswith('#'):
-            if self.t9_chan(line.args[0]) and line.args[0] != self.config['console_channel']:
+        line_chan = line.args[0].lower()
+        if line_chan.startswith('#'):
+            if self.t9_chan(line_chan) and line_chan != self.config['console_channel']:
                 def user_log(msg):
-                    self.send_line(f'PRIVMSG {line.args[0]} :{msg}')
+                    self.send_line(f'PRIVMSG {line_chan} :{msg}')
             else:
                 user_log = self.logger.info
         else:
@@ -60,11 +66,12 @@ class InterfaceComponent(object):
         return user_log
 
     def respond(self, line):
-        if line.args[0] == self.config['console_channel']:
+        line_chan = line.args[0].lower()
+        if line_chan == self.config['console_channel']:
             respond = self.logger.info
-        elif line.args[0].startswith('#'):
+        elif line_chan.startswith('#'):
             def respond(msg):
-                self.send_line(f'PRIVMSG {line.args[0]} :{msg}')
+                self.send_line(f'PRIVMSG {line_chan} :{msg}')
         else:
             def respond(msg):
                 self.send_line(f'PRIVMSG {line.handle.nick} :{msg}')

@@ -1,0 +1,33 @@
+##
+## build
+##
+
+FROM t9-base-image AS build
+
+WORKDIR /tmp
+RUN mkdir t9 t9_config
+COPY t9/ t9/
+COPY t9_config/ t9_config/
+COPY README.md LICENSE.txt ./
+COPY setup.t9-irc-bot.py setup.py
+RUN python3 setup.py sdist
+
+LABEL t9.image=build-t9-irc-bot
+
+
+##
+## main image
+##
+
+FROM t9-base-image
+
+COPY --from=build /tmp/dist/t9-irc-bot-*.tar.gz /tmp/
+RUN pip3 install /tmp/t9-irc-bot-*.tar.gz
+RUN rm /tmp/t9-irc-bot-*.tar.gz \
+ && mkdir -p /media/t9-home-mnt
+
+VOLUME /media/t9-home-mnt
+
+CMD ["python3", "-m", "t9"]
+
+LABEL t9.image=t9-irc-bot

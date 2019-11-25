@@ -5,6 +5,7 @@ from collections import deque
 from datetime import datetime
 
 from .exceptions import *
+from .server_exec import ServerExecSession
 from .utils import InterfaceComponent, env_var_name_re
 
 
@@ -177,79 +178,88 @@ class UserFunctions(InterfaceComponent):
         else:
             raise BuiltinNotFoundError(cmd)
 
+    @staticmethod
+    def _regex_env_vars(regex_match, env: dict):
+        if not regex_match:
+            return
+
+        env['T9_MATCH_0'] = regex_match.group(0)
+        for i, group_str in enumerate(regex_match.groups(default='')):
+            env[f"T9_MATCH_{i + 1}"] = group_str
+        for name, group_str in regex_match.groupdict(default='').items():
+            env[f"T9_MATCH_{name}"] = group_str
+
+    @staticmethod
+    def _stack_env_vars(stack, env: dict):
+        if not stack:
+            return
+        if len(stack) <= 1:
+            return
+
+        for i in range(1, len(stack)):
+            stack_func, stack_data = stack[i]
+            env[f"T9_STACK_{i}_FUNC"] = stack_func
+            env[f"T9_STACK_{i}_DATA"] = stack_data
+
+    def _secrets_env_vars(self, line, called_as, stack, env: dict):
+        if not self.db:
+            return
+
+        func_setter = None
+        try:
+            if stack:
+                # called in function stack
+                func_def = self.functions[called_as]
+                func_setter = func_def['setter_nick']
+            else:
+                # called as command
+                if self.t9_chan(line.args[0]):
+                    func_setter = line.handle.nick
+                else:
+                    self.logger.debug('exec call from non-t9 chan!')
+        except KeyError as e:
+            self.logger.debug(f'KeyError looking up function setter for "{called_as}" call: {e.args[0]} - secrets will not be passed this call')
+
+        if not func_setter:
+            return
+
+        with self.db.cursor() as dbc:
+            dbc.execute("SELECT env_var, secret FROM secrets WHERE owner_nick=%s",
+                        (func_setter,))
+            for env_var, secret in dbc:
+                if env_var_name_re.match(env_var) and not env_var.upper().startswith('T9_'):
+                    env[env_var] = secret
+                    self.logger.debug(f'Injecting secret ${env_var} for {func_setter}')
+                else:
+                    self.logger.debug('Invalid env_var name stored in database!')
+
+    def _user_db_env_vars(self, env: dict):
+        if 'user_db' not in self.config:
+            return
+        dsn = []
+        have_manual_dsn = False
+        for config_key, config_val in self.config['user_db'].items():
+            env_suffix = config_key.upper()
+            dsn_key = config_key.lower()
+            env[f'T9_DB_{env_suffix}'] = str(config_val)
+            if dsn_key == 'dsn':
+                have_manual_dsn = True
+            else:
+                dsn.append(f'{dsn_key}={config_val}')
+        if not have_manual_dsn:
+            dsn = ' '.join(dsn)
+            env['T9_DB_DSN'] = dsn
+
     async def exec(self, line, func_data, param='', stack=None, timelimit=None, regex_match=None):
         """The main thing T9 does - exec user input on a container"""
         if timelimit is None:
             timelimit = self.config['function_exec_time']
 
-        extra_env = []
-
-        if stack:
-            called_as = stack[0][0]
-
-            if len(stack) > 1:
-                for i in range(1, len(stack)):
-                    stack_func, stack_data = stack[i]
-                    extra_env.extend(['-e', f"T9_STACK_{i}_FUNC={stack_func}",
-                                      '-e', f"T9_STACK_{i}_DATA={stack_data}"])
-        else:
-            called_as = ''
-
-        if regex_match:
-            extra_env.extend(['-e', f"T9_MATCH_0={regex_match.group(0)}"])
-            for i, group_str in enumerate(regex_match.groups(default='')):
-                extra_env.extend(['-e', f"T9_MATCH_{i+1}={group_str}"])
-            for name, group_str in regex_match.groupdict(default='').items():
-                extra_env.extend(['-e', f"T9_MATCH_{name}={group_str}"])
-
-        if self.config['exec_python_utf8']:
-            extra_env.extend(['-e', 'PYTHONUTF8=1',
-                              '-e', 'PYTHONIOENCODING=utf-8:replace'])
-
-        if self.db:
-            func_setter = None
-            try:
-                if stack:
-                    # called in function stack
-                    func_def = self.functions[called_as]
-                    func_setter = func_def['setter_nick']
-                else:
-                    # called as command
-                    if self.t9_chan(line.args[0]):
-                        func_setter = line.handle.nick
-                    else:
-                        self.logger.debug('exec call from non-t9 chan!')
-            except KeyError as e:
-                self.logger.debug(f'KeyError looking up function setter for "{called_as}" call: {e.args[0]} - secrets will not be passed this call')
-
-            if func_setter:
-                with self.db.cursor() as dbc:
-                    dbc.execute("SELECT env_var, secret FROM secrets WHERE owner_nick=%s",
-                                (func_setter,))
-                    for env_var, secret in dbc:
-                        if env_var_name_re.match(env_var) and not env_var.upper().startswith('T9_'):
-                            extra_env.extend(['-e', f"{env_var}={secret}"])
-                            self.logger.debug(f'Injecting secret ${env_var} for {func_setter}')
-                        else:
-                            self.logger.debug('Invalid env_var name stored in database!')
-
-        if 'user_db' in self.config:
-            extra_env.extend([
-                '-e', f"T9_DB_USER={self.config['user_db']['user']}",
-                '-e', f"T9_DB_HOST={self.config['user_db']['host']}",
-                '-e', f"T9_DB_PORT={self.config['user_db']['port']}",
-                '-e', f"T9_DB_NAME={self.config['user_db']['dbname']}",
-                '-e', f"T9_DB_DSN=user={self.config['user_db']['user']}"
-                               f" host={self.config['user_db']['host']}"
-                               f" port={self.config['user_db']['port']}"
-                               f" dbname={self.config['user_db']['dbname']}",
-            ])
-
         cmd_args = shlex.split(func_data)
+
         while cmd_args[0][0] == '-':
             self.logger.debug('Removing leading - from command')
             cmd_args[0] = cmd_args[0][1:]
-        self.logger.info(f'Running $exec [{func_data}]')
 
         proto_args_str = ' '.join(line.args)
         if line.cmd == 'PRIVMSG':
@@ -258,66 +268,78 @@ class UserFunctions(InterfaceComponent):
             line_channel = ''
 
         exec_locale = self.config['exec_locale']
+        if stack:
+            called_as = stack[0][0]
+        else:
+            called_as = ''
+
+        env = {
+            'LC_ALL': exec_locale,
+            'LANG': exec_locale,
+            'T9_FUNC': called_as,
+            'T9_INPUT': param,
+            'T9_NICK': line.handle.nick,
+            'T9_USER': line.handle.user,
+            'T9_VHOST': line.handle.host,
+            'T9_CHANNEL': line_channel,
+            'T9_PROTO_LINE': str(line),
+            'T9_PROTO_COMMAND': line.cmd,
+            'T9_PROTO_ARGS': proto_args_str,
+        }
+
+        if self.config['exec_python_utf8']:
+            env['PYTHONUTF8'] = '1'
+            env['PYTHONIOENCODING'] = 'utf-8:replace'
+
+        self._regex_env_vars(regex_match, env)
+        self._stack_env_vars(stack, env)
+        self._secrets_env_vars(line, called_as, stack, env)
+        self._user_db_env_vars(env)
+
+        self.logger.info(f'Running $exec [{func_data}]')
 
         # effectively increment the counter
         self.exec_counter.put_nowait(None)
 
         # try-finally block to guarantee we decrement the above once done
         try:
-            proc = await asyncio.create_subprocess_exec(
-                'docker', 'exec', '-i', '-u', 'user:user', '-w', '/home/user',
-                '-e', f"LC_ALL={exec_locale}",
-                '-e', f"LANG={exec_locale}",
-                '-e', f"T9_FUNC={called_as}",
-                '-e', f"T9_INPUT={param}",
-                '-e', f"T9_NICK={line.handle.nick}",
-                '-e', f"T9_USER={line.handle.user}",
-                '-e', f"T9_VHOST={line.handle.host}",
-                '-e', f"T9_CHANNEL={line_channel}",
-                '-e', f"T9_PROTO_LINE={line}",
-                '-e', f"T9_PROTO_COMMAND={line.cmd}",
-                '-e', f"T9_PROTO_ARGS={proto_args_str}",
-                *extra_env,
-                self.config['container_name'],
-                *cmd_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=2048,
-            )
-
             if timelimit > 90:
                 self.respond(line)(f'Running for up to {timelimit} seconds')
 
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timelimit,
-                )
-
+            async with ServerExecSession(self.config) as server:
                 try:
-                    out_line = stdout.decode('utf-8').splitlines()[0].rstrip()
-                    if out_line:
-                        self.respond(line)(out_line)
+                    status, stdout, stderr = await server.exec(
+                        args=cmd_args,
+                        env=env,
+                        user='user:user',
+                        cwd='/home/user',
+                        timeout=timelimit,
+                    )
+
+                    try:
+                        out_line = stdout.decode('utf-8').splitlines()[0].rstrip()
+                        if out_line:
+                            self.respond(line)(out_line)
+                        else:
+                            self.logger.debug('Stdout line is empty')
+                    except IndexError:
+                        self.logger.debug('No stdout lines')
+
+                    stderr = stderr.decode('utf-8').strip()
+                    if stderr:
+                        err_short_url = self.pastebin(stderr)
+                        if err_short_url:
+                            self.user_log(line)(f'$exec [{func_data}] STDERR output at {err_short_url}')
+                        else:
+                            err_line = stderr.splitlines()[-1].strip()
+                            self.user_log(line)(f'$exec [{func_data}] STDERR final line | {err_line}')
                     else:
-                        self.logger.debug('Stdout line is empty')
-                except IndexError:
-                    self.logger.debug('No stdout lines')
+                        self.logger.debug('No stderr output')
 
-                stderr = stderr.decode('utf-8').strip()
-                if stderr:
-                    err_short_url = self.pastebin(stderr)
-                    if err_short_url:
-                        self.user_log(line)(f'$exec [{func_data}] STDERR output at {err_short_url}')
-                    else:
-                        err_line = stderr.splitlines()[-1].strip()
-                        self.user_log(line)(f'$exec [{func_data}] STDERR final line | {err_line}')
-                else:
-                    self.logger.debug('No stderr output')
+                    self.user_log(line)(f'$exec [{func_data}] exited {status}')
 
-                self.user_log(line)(f'$exec [{func_data}] exited {proc.returncode}')
-
-            except asyncio.TimeoutError:
-                self.user_log(line)(f'$exec [{func_data}] timed out')
+                except asyncio.TimeoutError:
+                    self.user_log(line)(f'$exec [{func_data}] timed out')
         finally:
             # effectively decrement the counter
             self.exec_counter.get_nowait()

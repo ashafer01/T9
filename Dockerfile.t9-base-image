@@ -1,0 +1,13 @@
+FROM alpine:latest
+
+RUN mkdir /etc/t9
+VOLUME /etc/t9
+RUN apk --no-cache add \
+    python3 \
+    py3-psycopg2 \
+    py3-multidict \
+ && ln -s /usr/bin/python3 /usr/bin/python \
+ && easy_install-3.7 pip \
+ && pip install --upgrade pip
+
+LABEL t9.image=t9-base-image

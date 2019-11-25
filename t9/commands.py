@@ -1,6 +1,7 @@
 import asyncio
 import shlex
 
+from .server_exec import ServerExecSession
 from .utils import parse_timelimit, InterfaceComponent, env_var_name_re
 
 
@@ -27,6 +28,7 @@ class Commands(InterfaceComponent):
         self.db = db
         self.functions = functions
         self.exclusive_container_control = ExclusiveContainerControl(self.logger, sync_lock, functions.exec_counter)
+        self.package_manager_lock = asyncio.Lock()
 
     def command_candidate(self, line):
         return line.text[0] in self.config['command_leaders']
@@ -120,19 +122,23 @@ class Commands(InterfaceComponent):
 
     async def cmd_apt_get(self, line, cmd, args):
         """$apt-get command"""
-        cmd_args = shlex.split(args)
-        self.user_log(line)('Running apt-get -y ...')
-        proc = await asyncio.create_subprocess_exec(
-            'docker', 'exec', '-i', self.config['container_name'],
-            'apt-get', '-y', *cmd_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        self.respond(line)(f'apt-get exited {proc.returncode}')
-        if proc.returncode != 0:
-            last_err_line = stderr.splitlines()[-1]
-            self.respond(line)('apt-get: ' + last_err_line.decode('utf-8'))
+        self.respond(line)('The exec container now uses Alpine Linux which uses the APK package manager -- see $apk [help]')
+
+    async def cmd_apk(self, line, cmd, args):
+        """$apk command for alpine exec server"""
+        plain_args = args.strip().lower()
+        if plain_args in ('help', '-h', '--help'):
+            self.respond(line)('https://wiki.alpinelinux.org/wiki/Alpine_Linux_package_management')
+            return
+        async with self.package_manager_lock:
+            cmd_args = shlex.split(args)
+            self.user_log(line)('Running apk ...')
+            async with ServerExecSession(self.config) as server:
+                status, stdout, stderr = server.exec(args=['apk', *cmd_args])
+            self.respond(line)(f'apk exited {status}')
+            if status != 0:
+                last_err_line = stderr.splitlines()[-1]
+                self.respond(line)('apk: ' + last_err_line.decode('utf-8'))
 
     async def cmd_inspect(self, line, cmd, args):
         try:
@@ -140,22 +146,42 @@ class Commands(InterfaceComponent):
         except KeyError:
             self.respond(line)(f'Function "{args}" does not exist')
             return
-        self.respond(line)('"{func_name}" <{func}> {func_data} -- set by {setter_nick} on {set_time}'.format(func_name=args, **func_def))
+        self.respond(line)('{func_name} <{func}> {func_data} '
+                           '\x0311-!-\x03 set by {setter_nick} on {set_time}'.format(func_name=args, **func_def))
 
     async def cmd_restart(self, line, cmd, args):
-        self.user_log(line)('Waiting for container lock ...')
+        """Command to restart the exec server.
+
+        Works by telling the exec server to shut down; assumes that Docker, an init system, or some other automation
+        will restart the server after it exits.
+        """
+        wait_time = 1.5
+        poll_count = 20
+
+        self.user_log(line)('Waiting for any running functions to finish before $restart ...')
         async with self.exclusive_container_control:
-            self.respond(line)('Restarting container ...')
-            proc = await asyncio.create_subprocess_exec(
-                'docker', 'restart', self.config['container_name'],
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            ret = await asyncio.wait_for(proc.wait(), timeout=30)
-            if ret == 0:
-                self.respond(line)('docker restart exited 0')
-            else:
-                self.respond(line)(f'docker restart exited {ret} - exec functions may fail')
+            self.respond(line)('Restarting exec server ...')
+            async with ServerExecSession(self.config) as server:
+                await server.exit()
+                await asyncio.sleep(2*wait_time)
+                server_online = False
+                self.logger.debug('Starting exec server online polling ...')
+                for _ in range(poll_count):
+                    try:
+                        await server.status(timeout=wait_time)
+                        server_online = True
+                        break
+                    except asyncio.TimeoutError:
+                        self.logger.debug('Exec server poll timed out')
+                    except Exception as e:
+                        self.logger.debug(f'Unhandled exception while polling for exec server online: {e}')
+                        await asyncio.sleep(wait_time)
+                if server_online:
+                    self.respond(line)('Restart completed successfully')
+                else:
+                    self.respond(line)('Exec server did not come back up in the expected time frame. $exec functions '
+                                       'will fail until the exec server is online.')
+                    self.logger.error('exec server did not come back up after $restart!')
 
     async def _write_locking_control(self, line, cmd, args):
         if not self.db:
@@ -175,80 +201,77 @@ class Commands(InterfaceComponent):
             if args.startswith(prefix):
                 args = args[len(prefix):]
 
-            # verify the path exists and obtain the real absolute path
-            proc = await asyncio.create_subprocess_exec(
-                'docker', 'exec', '-i',
-                '-e', f"SECURE_BASE={self.config['secure_base']}",
-                '-e', f"REQUESTED_LOCK={args}",
-                self.config['container_name'],
-                '/home/user/write_lock.sh', 'realpath',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=3)
-            try:
-                stdout_line = stdout.decode('utf-8').splitlines()[0].rstrip()
-            except IndexError:
-                self.respond(line)('ERROR: no output when resolving path')
-                return
-            if not stdout_line:
-                self.respond(line)('ERROR: empty result when resolving path')
-                return
-            if proc.returncode == 0:
-                real_path = stdout_line
-            else:
-                self.respond(line)(f'{stdout_line} (path resolution)')
-                return
+            env = [
+                f"SECURE_BASE={self.config['secure_base']}",
+                f"REQUESTED_LOCK={args}",
+            ]
 
-            with self.db.cursor() as dbc:
-                dbc.execute('SELECT owner_nick FROM write_locks WHERE file_path=%s',
-                            (real_path,))
-                if dbc.rowcount > 0:
-                    # file is already locked
-                    owner_nick, = dbc.fetchone()
-                    if cmd == 'ro' or owner_nick != line.handle.nick.lower():
-                        self.respond(line)(f'{line.handle.nick}: {real_path} is already locked by {owner_nick}')
-                        return
+            async with ServerExecSession(self.config) as server:
+                # verify the path exists and obtain the real absolute path
+                status, stdout, stderr = await asyncio.wait_for(
+                    server.exec(args=['/home/user/write_lock.sh', 'realpath'], env=env),
+                    timeout=3,
+                )
+                try:
+                    stdout_line = stdout.decode('utf-8').splitlines()[0].rstrip()
+                except IndexError:
+                    self.respond(line)('ERROR: no output when resolving path')
+                    return
+                if not stdout_line:
+                    self.respond(line)('ERROR: empty result when resolving path')
+                    return
+                if status == 0:
+                    real_path = stdout_line
+                else:
+                    self.respond(line)(f'{stdout_line} (path resolution)')
+                    return
 
-            proc = await asyncio.create_subprocess_exec(
-                'docker', 'exec', '-i',
-                '-e', f"SECURE_BASE={self.config['secure_base']}",
-                '-e', f"REQUESTED_LOCK={args}",
-                self.config['container_name'],
-                '/home/user/write_lock.sh', cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=3)
-            try:
-                stdout_line = stdout.decode('utf-8').splitlines()[0].rstrip()
-            except IndexError:
-                stdout_line = ''
-            try:
-                stderr_line = stderr.decode('utf-8').splitlines()[0].rstrip()
-            except IndexError:
-                stderr_line = ''
-            if stderr_line:
-                self.respond(line)(f'${cmd} STDERR: {stderr_line}')
-            if proc.returncode == 0:
                 with self.db.cursor() as dbc:
-                    if cmd == 'ro':
-                        dbc.execute('INSERT INTO write_locks (file_path, owner_nick) VALUES (%s, %s)',
-                                    (real_path, line.handle.nick.lower()))
-                    else:
-                        dbc.execute('DELETE FROM write_locks WHERE file_path=%s AND owner_nick=%s',
-                                    (real_path, line.handle.nick.lower()))
-                        if dbc.rowcount == 0:
-                            self.respond(line)(f'{line.handle.nick}: Did not find your lock on {real_path} but the file should be writable now')
+                    dbc.execute('SELECT owner_nick FROM write_locks WHERE file_path=%s',
+                                (real_path,))
+                    if dbc.rowcount > 0:
+                        # file is already locked
+                        owner_nick, = dbc.fetchone()
+                        if cmd == 'ro' or owner_nick != line.handle.nick.lower():
+                            self.respond(line)(f'{line.handle.nick}: {real_path} is already locked by {owner_nick}')
                             return
-                    self.db.commit()
-            self.respond(line)(f'{line.handle.nick}: {stdout_line}')
+
+                # perform the requested lock/unlock operation as defined by cmd
+                status, stdout, stderr = await asyncio.wait_for(
+                    server.exec(args=['/home/user/write_lock.sh', cmd], env=env),
+                    timeout=3,
+                )
+                try:
+                    stdout_line = stdout.decode('utf-8').splitlines()[0].rstrip()
+                except IndexError:
+                    stdout_line = ''
+                try:
+                    stderr_line = stderr.decode('utf-8').splitlines()[0].rstrip()
+                except IndexError:
+                    stderr_line = ''
+                if stderr_line:
+                    self.respond(line)(f'${cmd} STDERR: {stderr_line}')
+                if status == 0:
+                    with self.db.cursor() as dbc:
+                        if cmd == 'ro':
+                            dbc.execute('INSERT INTO write_locks (file_path, owner_nick) VALUES (%s, %s)',
+                                        (real_path, line.handle.nick.lower()))
+                        else:
+                            dbc.execute('DELETE FROM write_locks WHERE file_path=%s AND owner_nick=%s',
+                                        (real_path, line.handle.nick.lower()))
+                            if dbc.rowcount == 0:
+                                self.respond(line)(f'{line.handle.nick}: Did not find your lock on {real_path} '
+                                                   'but the file should be writable now')
+                                return
+                        self.db.commit()
+                self.respond(line)(f'{line.handle.nick}: {stdout_line}')
 
     cmd_ro = _write_locking_control
     cmd_rw = _write_locking_control
 
     async def cmd_secret(self, line, cmd, args):
-        self.respond(line)('Command $secret is only available in PM. If you just sent credentials they should be revoked and reissued.')
+        self.respond(line)('Command $secret is only available in PM. If you just sent credentials they should be '
+                           'revoked and reissued.')
 
     async def pm_cmd_secret(self, line, cmd, args):
         if not self.db:

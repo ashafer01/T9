@@ -27,25 +27,47 @@ Check the example config for more information.
 
 Documentation is available in the [GitHub wiki](https://github.com/ashafer01/T9/wiki).
 
-To install from source:
+Originally built on Python 3.7.3
 
-```
-python3 setup.py install
+## Quickstart
+
+Use `./quickstart.sh` to build images and bring up services in the foreground for testing and demos. This includes
+a local IRC server and Postgres database. Making direct use of the [quickstart orchestration](orchestration/quickstart)
+is also a good starting point if you *don't* have an existing IRC server or DB.
+
+Point your IRC client at `localhost:42667` and join `#T9-playground` to try it out.
+
+## Standalone
+
+Using or modifying the [standalone orchestration](orchestration/standalone) is recommended for most users who wish to
+use T9 with an existing IRC server and database.
+
+## Custom and Manual Deployments
+
+T9 does not explicitly require the use of Docker as of 0.2.0. The exec server and T9 are both normal Python
+applications. For any semblance of security, running the exec server in some kind of isolated environment is strongly
+recommended. This environment could be a Docker container, virtual machine, Raspberry Pi, or anything in between.
+
+Starting from a freshly cloned git repo, to install and run the exec server:
+
+```bash
+python3 setup.t9-exec-server.py install
+python3 -m t9_exec_server
 ```
 
-To start, assuming a complete config file is in the working directory:
+And for T9 itself:
 
-```
+```bash
+python3 setup.t9-irc-bot.py install
+
+# Assuming a valid config.yaml is in the current directory
+python3 -m t9
+
+# You can also pass in the path to a config file
+python3 -m t9 ~/some/dir/t9.yaml
+
+# Finally you can pass in a config filename by environment variable
+export T9_CONFIG_FILE="/opt/my_deployments/t9/config.yaml"
 python3 -m t9
 ```
 
-You can also pass a config file location:
-
-```
-python3 -m t9 ~/some/dir/t9.yaml
-```
-
-Finally you can set the `T9_CONFIG_FILE` environment variable to the path to
-a config file.
-
-Originally built on Python 3.7.3

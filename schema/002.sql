@@ -1,0 +1,1 @@
+ALTER TABLE funcs ADD PRIMARY KEY (func_name);

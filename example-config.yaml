@@ -4,12 +4,13 @@
 # Keep this file unchanged for a constant reference
 # Delete this comment in your conifg.yaml
 
-# You will need to update operational configs like hosts, ports, credentials,
-# and filesystem paths, but everything else should represent a working default.
+# This config works as-is in the supplied docker-compose environment.
+# In other environments, you will need to update operational configs like hosts, ports, credentials,
+# and filesystem paths. Nicks, channel names, etc. may need to change if you do not own the IRC server.
 
 
 # required connection info
-host: '127.0.0.1'
+host: 'irc'
 port: 6667
 nick: 'T9'
 user: 'T9'
@@ -19,12 +20,12 @@ realname: 'T9 Anything Bot'
 # optional connection password (most servers dont use these)
 #password: ''
 
-# required name of the local docker container to run $exec on
-container_name: 't9-exec'
+# required - URL for the T9 exec server endpoint
+exec_server_base_url: 'http://t9-exec-server:8080'
 
-# required- log output gets sent to this channel
-# must start with #{nick}-
-console_channel: '#T9-console'
+# optional- customize log output channel, defaults to #{nick}-console
+# Must start with #{nick}- if commands, etc. are to work normally in this channel
+#console_channel: '#T9-console'
 
 # optional logging level name to use for the irc handler
 # defaults to info, set to False to disable irc logging
@@ -37,7 +38,7 @@ channels:
   - '#T9-playground'
 
 # required string to return for help commands
-help: "Call your operator!"
+help: "https://github.com/ashafer01/T9/wiki/T9-User-Docs"
 
 # required leader characters for various purposes, can specify multiple
 # equivalent options
@@ -49,7 +50,7 @@ user_leaders: '!.;'
 # and returns a web URL showing the full string ideally in monospace font
 # This is used to capture stderr output from user functions. If this config
 # is not set only the final line of stderr output will be logged
-pastebin_function: my_paste.paster_module.paste_text_function
+#pastebin_function: my_paste.paster_module.paste_text_function
 
 # optional configs to enable accepting files over DCC and making them
 # available on the container
@@ -62,14 +63,19 @@ secure_base: '/home/user/secure'
 rel_secure_base: 'secure'
 
 # db is optional but some features will not work without one
+# keys passed through as keywords to psycopg2.connect()
 # designed for Postgres and psycopg2
 db:
-  user: 't9'
-  dbname: 't9'
-  password: 'hunter2'
-  host: '127.0.0.1'
+  user: 'postgres'
+  dbname: 'postgres'
+  password: 'password'
+  host: 'postgres'
 
 # optionally enable passing in T9_DB_ environment variables to $exec calls
+# allows arbitrary keys below user_db
+# keys will be lowercased and added to T9_DB_DSN as space-separated key=value pairs (if no `dsn` key is defined)
+# additionally, keys will be uppercased and defined as individual T9_DB_ variables for exec calls
+# designed for Postgres
 user_db:
   user: 't9_exec'
   dbname: 'some_data'
@@ -112,7 +118,7 @@ exec_locale: 'en_US.UTF-8'
 # enable extra python utf8 env vars for $exec runs
 exec_python_utf8: True
 
-# maxmimum user function call depth
+# maximum user function call depth
 stack_limit: 4
 
 

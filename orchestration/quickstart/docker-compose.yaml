@@ -1,0 +1,63 @@
+version: '2.4'
+volumes:
+  t9-home:
+    name: t9-home
+  t9-irc-bot-config:
+    name: t9-irc-bot-config
+  t9-exec-server-config:
+    name: t9-exec-server-config
+  t9-postgres-data:
+    name: t9-postgres-data
+services:
+  irc:
+    container_name: t9-irc
+    hostname: irc
+    image: ashafer01/unrealircd4
+    restart: unless-stopped
+    expose:
+      - "6667"
+    ports:
+      - "42667:6667"
+  postgres:
+    container_name: t9-postgres
+    hostname: postgres
+    image: postgres:11-alpine
+    restart: unless-stopped
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - "t9-postgres-data:/var/lib/postgresql/data"
+  t9-exec-server:
+    container_name: t9-exec-server
+    hostname: t9-exec-server
+    image: t9-exec-server
+    expose:
+      - "8080"
+    volumes:
+      - "t9-home:/home"
+      - "t9-exec-server-config:/etc/t9"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    cpus: 0.75
+    mem_limit: 1g
+    ulimits:
+      nofile:
+        soft: 1000
+        hard: 3000
+      nproc:
+        soft: 200
+        hard: 600
+  t9-irc-bot:
+    container_name: t9-irc-bot
+    image: t9-irc-bot
+    volumes:
+      - "t9-home:/media/t9-home-mnt"
+      - "t9-irc-bot-config:/etc/t9"
+    depends_on:
+      - t9-exec-server
+      - irc
+      - postgres
+    restart: unless-stopped

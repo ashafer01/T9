@@ -1,0 +1,48 @@
+version: '2.4'
+volumes:
+  t9-home:
+    name: t9-home
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /media/t9-home-mnt
+  t9-irc-bot-config:
+    name: t9-irc-bot-config
+  t9-exec-server-config:
+    name: t9-exec-server-config
+services:
+  t9-exec-server:
+    container_name: t9-exec-server
+    hostname: t9-exec-server
+    image: t9-exec-server
+    expose:
+      - "8080"
+    volumes:
+      - "t9-home:/home"
+      - "t9-exec-server-config:/etc/t9"
+    restart: unless-stopped
+    cpus: 0.75
+    mem_limit: 1g
+    ulimits:
+      nofile:
+        soft: 1000
+        hard: 3000
+      nproc:
+        soft: 200
+        hard: 600
+    external_links:
+      - postgres
+  t9-irc-bot:
+    container_name: t9-irc-bot
+    image: t9-irc-bot
+    volumes:
+      - "t9-home:/media/t9-home-mnt"
+      - "t9-irc-bot-config:/etc/t9"
+    depends_on:
+      - t9-exec-server
+    restart: unless-stopped
+    external_links:
+      - postgres
+    extra_hosts:
+      - "irc:127.0.0.1"

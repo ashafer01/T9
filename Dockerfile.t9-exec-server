@@ -1,0 +1,39 @@
+##
+## build
+##
+
+FROM t9-base-image AS build
+
+WORKDIR /tmp
+RUN mkdir t9_exec_server t9_config
+COPY t9_exec_server/ t9_exec_server/
+COPY t9_config/ t9_config/
+COPY README.md LICENSE.txt ./
+COPY setup.t9-exec-server.py setup.py
+RUN python3 setup.py sdist
+
+LABEL t9.image=build-t9-exec-server
+
+
+##
+## main image
+##
+
+FROM t9-base-image
+
+RUN mkdir /home/user && adduser -D -H user && chown -R user: /home/user
+COPY --chown=root:root write_lock.sh /home/user
+RUN chmod 544 /home/user/write_lock.sh
+VOLUME /home
+
+COPY --from=build /tmp/dist/t9-exec-server-*.tar.gz /tmp/
+RUN pip3 install /tmp/t9-exec-server-*.tar.gz
+RUN rm /tmp/t9-exec-server-*.tar.gz
+
+RUN apk --no-cache add bash coreutils
+
+EXPOSE 8080
+
+CMD ["python3", "-m", "t9_exec_server"]
+
+LABEL t9.image=t9-exec-server

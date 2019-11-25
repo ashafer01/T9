@@ -4,5 +4,11 @@
 *.swn
 *.pyc
 *.pyo
+dist
+*.egg-info
+*.tar
+*.tar.*
+*.ext4
+
 config.yaml
 change_db_password.sh

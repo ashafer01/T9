@@ -25,7 +25,8 @@ async def bot(config):
     config['ignore'] = [nick.lower() for nick in config['ignore']]
 
     config.setdefault('channels', [])
-    console_channel = config.setdefault('console_channel', '#{nick}-console'.format(**config))
+    console_channel = config.get('console_channel', '#{nick}-console'.format(**config)).lower()
+    config['console_channel'] = console_channel
     if console_channel not in config['channels']:
         config['channels'].append(console_channel)
 
@@ -46,12 +47,7 @@ async def bot(config):
     functions = UserFunctions(config, send_line)
 
     if 'db' in config:
-        db = psycopg2.connect(
-            dbname=config['db']['dbname'],
-            user=config['db']['user'],
-            password=config['db']['password'],
-            host=config['db']['host'],
-        )
+        db = psycopg2.connect(**config['db'])
 
         functions.load_from_db(db)
 
@@ -122,7 +118,7 @@ async def bot(config):
         else:
             logger.info('IRC logging disabled, see `console_channel_level` config option')
 
-    async def line_task(line):
+    async def handle_line(line):
         logger.debug(f'<= {line}')
         if line.cmd == 'ERROR':
             raise FatalError('Got ERROR from server')
@@ -171,9 +167,14 @@ async def bot(config):
     await writer.drain()
 
     def sigint_handler():
-        send_line('QUIT :Stop Requested')
+        send_line('QUIT :Stop Requested (SIGINT)')
 
-    asyncio.get_running_loop().add_signal_handler(signal.SIGINT, sigint_handler)
+    def sigterm_handler():
+        send_line('QUIT :Stop Requested (SIGTERM)')
+
+    event_loop = asyncio.get_running_loop()
+    event_loop.add_signal_handler(signal.SIGINT, sigint_handler)
+    event_loop.add_signal_handler(signal.SIGTERM, sigterm_handler)
 
     # start handling lines from the server
 
@@ -182,7 +183,7 @@ async def bot(config):
         await sync_lock.acquire()
         sync_lock.release()
 
-        line_coro = safe_await(line_task(line_obj))
+        line_coro = safe_await(handle_line(line_obj))
         if not handshake_done:
             # handle lines synchronously until the handshake is complete
             handshake_done = await line_coro
