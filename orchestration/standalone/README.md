@@ -57,7 +57,7 @@ docker network connect standalone_default postgres
 
 # If you're not sure about the name of the network (or if the above fails), run:
 docker network ls
-# The correct network will be the last one listed if you are the only user of this
+# The correct network should be the last one listed if you are the only user of this
 # Docker host and not running anything else. Use its name in place of
 # "standalone_default" in the previous command
 ```
@@ -72,7 +72,8 @@ For most internet-connected IRC servers you can just point your T9 config at the
 hostname and everything will work normally.
 
 For IRC servers running on the local Docker host, you can add another
-`external_links:` entry and connect the container to the compose network.
+`external_links:` entry and connect the container to the compose network (see example
+for database above).
 
 For me it was convenient to create another container that creates an SSH tunnel to the
 IRC server and then exposes the tunnel port on the compose network.
@@ -109,4 +110,37 @@ services:
     depends:
       - t9-exec-server
       - irc-tunnel
+```
+
+## Configuration
+
+Start by making a copy of the example config:
+
+```bash
+cp ../../example-config.yaml config.yaml
+```
+
+Edit with the editor of your choice. Ensure `host` and `port` are set correctly for your IRC connection. If the
+server uses a connection password, set `password` (this is different from a NickServ password; connection passwords
+are less common).
+
+The parameters under `db:` will get passed through as keywords arguments to
+[psycopg2.connect](http://initd.org/psycopg/docs/module.html#psycopg2.connect) and should be appropriate to your
+database configuration. If using the default `external_links:` in the compose file, `db.host` should be `postgres`.
+
+If user functions need database access, ensure the `user_db:` section is configured appropriately. Keys within this
+section will get built into a libpq DSN string and passed in via environment variables.
+
+Everything else in the example should work as a good default.
+
+After you have it set up, copy it to the container/volume:
+
+```bash
+docker cp config.yaml t9-irc-bot:/etc/t9/config.yaml
+```
+
+## Start!
+
+```bash
+docker-compose up
 ```
