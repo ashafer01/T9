@@ -3,17 +3,25 @@ import os
 import sys
 import yaml
 
+from .schema import config_schema
+from .utils import parse_time_interval
+
 logger = logging.getLogger('t9_config')
 handler = logging.StreamHandler()
 handler.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
+# Places where config files can be found without being explicitly named
 SPEC_CONFIG_LOCATIONS = (
     'config.yaml', 'config.yml',
     '~/.config/t9.yaml', '~/.config/t9.yml',
     '/etc/t9/config.yaml', '/etc/t9/config.yml',
 )
+
+# This string should be used in place of a config file path in the case that
+# all configuration should come from environment variables
+NO_CONFIG_FILE = 'none'
 
 
 def _real_path(fn):
@@ -58,17 +66,33 @@ def _fetch_config_filename():
         config_fn = fetch()
         if config_fn:
             logger.info(f'{message} = "{config_fn}"')
-            return _real_path(config_fn)
+            if config_fn == NO_CONFIG_FILE:
+                return NO_CONFIG_FILE
+            else:
+                return _real_path(config_fn)
 
     spec_list = ', '.join([l for l in SPEC_CONFIG_LOCATIONS if not l.endswith('.yml')])
     logger.error('FATAL: Unable to locate config filename, please pass as '
                  f'$1, $T9_CONFIG_FILE, or use a spec location: {spec_list}')
+    logger.info(f'You may pass {repr(NO_CONFIG_FILE)} in place of a filename to use environment variables for '
+                'all configuration')
     sys.exit(1)
 
 
-def _read_config_file(config_fn):
+def read_config_file(config_fn):
+    """Read a YAML config file and return the dict representation of it
+
+    Fails if the top-level object in the YAML document is not a mapping
+    Also accepts NO_CONFIG_FILE ("none") and returns an empty dict
+    """
+    if config_fn == NO_CONFIG_FILE:
+        logger.info('Not reading a config file -- expecting to get all configuration from environment variables')
+        return {}
     with open(config_fn) as f:
-        return yaml.safe_load(f.read())
+        new_config = yaml.safe_load(f.read())
+        if not isinstance(new_config, dict):
+            raise TypeError('YAML config must define a mapping at the top level')
+        return new_config
 
 
 _env_map = (
@@ -96,6 +120,10 @@ _env_map = (
     ('T9_CONFIG_MAX_EXEC_TIME', 'max_exec_time'),
     ('T9_CONFIG_EXEC_LOCALE', 'exec_locale'),
     ('T9_CONFIG_STACK_LIMIT', 'stack_limit'),
+    ('T9_CONFIG_TLS_CA_FILE', 'tls_ca_file'),
+    ('T9_CONFIG_TLS_CA_DIRECTORY', 'tls_ca_directory'),
+    ('T9_CONFIG_TLS_CLIENT_CERT', 'tls_client_cert'),
+    ('T9_CONFIG_TLS_CLIENT_PRIVATE_KEY', 'tls_client_private_key'),
 )
 
 
@@ -111,6 +139,8 @@ def _basic_env_config(_config):
 _env_map_bools = (
     ('T9_CONFIG_DEFINE_FUNCTIONS_IN_T9_CHANNELS_ONLY', 'define_functions_in_t9_channels_only'),
     ('T9_CONFIG_EXEC_PYTHON_UTF8', 'exec_python_utf8'),
+    ('T9_CONFIG_TLS', 'tls'),
+    ('T9_CONFIG_TLS_VERIFY', 'tls_verify'),
 )
 
 
@@ -128,14 +158,14 @@ def _bool_env_config(_config):
             pass
 
 
-def _csl(val):
-    return [i.strip() for i in val.split(',')]
-
-
 _env_map_lists = (
     ('T9_CONFIG_CHANNELS', 'channels'),
     ('T9_CONFIG_IGNORE', 'ignore'),
 )
+
+
+def _csl(val):
+    return [i.strip() for i in val.split(',')]
 
 
 def _list_env_config(_config):
@@ -152,9 +182,8 @@ _db_env_prefix_config_key_map = (
     ('T9_CONFIG_USER_DB_', 'user_db'),
 )
 
-_db_suffix_env_map = {
+_db_env_suffix_map = {
     'NAME': 'dbname',
-    'DBNAME': 'dbname',
 }
 
 
@@ -162,13 +191,13 @@ def _db_env_config(_config):
     for var_name in os.environ:
         for prefix, config_key in _db_env_prefix_config_key_map:
             if var_name.startswith(prefix):
-                prefix_len = len(prefix)
-                suffix = var_name[prefix_len:]
+                suffix = var_name[len(prefix):]
                 if not suffix:
                     raise RuntimeError(f'Missing suffix on environment variable {var_name}')
-                config_subkey = _db_suffix_env_map.get(suffix, suffix.lower())
+                config_subkey = _db_env_suffix_map.get(suffix, suffix.lower())
                 db_config = _config.setdefault(config_key, {})
                 db_config[config_subkey] = os.environ[var_name]
+                break
 
 
 def _invite_allowed_env_config(_config):
@@ -193,14 +222,51 @@ def _env_config(_config):
     _invite_allowed_env_config(_config)
 
 
-def _load_config():
-    config_fn = _fetch_config_filename()
-    _config = _read_config_file(config_fn)
-    _env_config(_config)
-    return _config
+config_filename = _fetch_config_filename()
 
 
-config = _load_config()
-logging.config.dictConfig(config.get('logging', {'version': 1}))
+def reload_config():
+    """[Re]load the configuration
 
-__all__ = ['config', 'SPEC_CONFIG_LOCATIONS']
+    * [Re-]reads the identified config file and replaces the contents of the singleton config dict with it
+    * Any config variables in os.environ will be overlaid onto the dict [again]
+    * Normalization and setting of defaults will occur [again]
+    """
+    new_config = read_config_file(config_filename)
+    _env_config(new_config)
+    new_config = config_schema.check_value(new_config)
+    config.clear()
+    config.update(new_config)
+
+
+def update_config(overlay_dict):
+    """Apply a partial config dict to the singleton config dict
+
+    Values for top-level keys will be overwritten with those in overlay_dict
+    No recursion will take place for sub-dicts; the entire sub-dict will be overwritten
+    """
+    config.update(overlay_dict)
+    new_config = config_schema.check_value(config)
+    config.clear()
+    config.update(new_config)
+
+
+# Create singleton config dict
+config = {}
+
+# Do the initial load
+reload_config()
+
+# Set up logging objects for later retrieval
+logging.config.dictConfig(config['logging'])
+
+__all__ = [
+    'config',
+    'config_filename',
+    'read_config_file',
+    'reload_config',
+    'update_config',
+    'parse_time_interval',
+    'SPEC_CONFIG_LOCATIONS',
+    'NO_CONFIG_FILE',
+]

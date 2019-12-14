@@ -5,22 +5,6 @@ from importlib import import_module
 env_var_name_re = re.compile('^[a-zA-Z][a-zA-Z0-9_]{3,31}$')
 
 
-def parse_timelimit(time_arg):
-    try:
-        return int(time_arg)
-    except ValueError:
-        pass
-    if time_arg.endswith('s'):
-        timelimit = int(time_arg[:-1])
-    elif time_arg.endswith('m'):
-        timelimit = int(time_arg[:-1]) * 60
-    elif time_arg.endswith('h'):
-        timelimit = int(time_arg[:-1]) * 3600
-    else:
-        raise ValueError('Unknown time units')
-    return timelimit
-
-
 class Component(object):
     def __init__(self, config):
         self.config = config
@@ -32,9 +16,7 @@ class InterfaceComponent(Component):
         Component.__init__(self, config)
         self.send_line = send_line
 
-        self._t9_channel_prefix = '#' + config['nick'].lower() + '-'
-
-        cfg_pastebin_func = config.get('pastebin_function')
+        cfg_pastebin_func = config['pastebin_function']
         if cfg_pastebin_func:
             mod_name, obj_name = cfg_pastebin_func.rsplit('.', 1)
             mod = import_module(mod_name)
@@ -43,6 +25,10 @@ class InterfaceComponent(Component):
         else:
             self._pastebin_func = None
 
+    @staticmethod
+    def is_valid_env_var(env_var):
+        return env_var_name_re.match(env_var) and not env_var.upper().startswith('T9_')
+
     def pastebin(self, text):
         if self._pastebin_func:
             return self._pastebin_func(text)
@@ -50,7 +36,7 @@ class InterfaceComponent(Component):
             return False
 
     def t9_chan(self, channel):
-        return channel.lower().startswith(self._t9_channel_prefix)
+        return channel.lower().startswith('#' + self.config['nick'].lower() + '-')
 
     def user_log(self, line):
         line_chan = line.args[0].lower()

@@ -2,7 +2,7 @@ import asyncio
 import os.path
 import shlex
 
-from .utils import InterfaceComponent
+from .components import InterfaceComponent
 
 
 class CTCP(InterfaceComponent):
@@ -15,10 +15,7 @@ class CTCP(InterfaceComponent):
         ctcp_args = shlex.split(line.text.strip('\x01'))
         ctcp_cmd = ctcp_args[0].upper()
         if ctcp_cmd == 'DCC':
-            try:
-                self.config['dcc_max_size']
-                self.config['dcc_dir']
-            except KeyError:
+            if not self.config['dcc_max_size'] or not self.config['dcc_dir']:
                 self.logger.error('dcc_dir/dcc_max_size config required for DCC')
                 return
             dcc_cmd = ctcp_args[1]

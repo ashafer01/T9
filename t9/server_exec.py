@@ -3,7 +3,7 @@ import aiohttp
 import struct
 from typing import List, Dict
 
-from .utils import Component
+from .components import Component
 
 FMT_ID = b'\x01T91\x1d'
 HEADER_STRUCT = '>5s2B2I'
@@ -11,16 +11,15 @@ HEADER_SIZE = struct.calcsize(HEADER_STRUCT)
 
 
 class ServerExecSession(Component):
-    def __init__(self, config):
-        Component.__init__(self, config)
-        self.base_url = self.config['exec_server_base_url']
-
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
         return self
 
     async def __aexit__(self, etype, e, trace):
         await self.session.close()
+
+    def url(self, path):
+        return self.config['exec_server_base_url'] + path
 
     def unpack_output(self, res_data):
         fmt_id, exc_status, status, out_len, err_len = struct.unpack(HEADER_STRUCT, res_data[:HEADER_SIZE])
@@ -42,7 +41,7 @@ class ServerExecSession(Component):
         if timeout:
             params['Timeout'] = timeout  # server-side timeout -- actual exec time limit
 
-        exec_url = self.base_url + '/exec'
+        exec_url = self.url('/exec')
         self.logger.debug(f'Sending exec request to {exec_url} {repr(params)}')
         res = await self.session.post(
             exec_url,
@@ -65,14 +64,14 @@ class ServerExecSession(Component):
 
     async def exit(self):
         try:
-            await self.session.post(self.base_url + '/exit')
+            await self.session.post(self.url('/exit'))
         except Exception:
             # we're telling the server to abruptly exit
             # probly wont get a valid response
             pass
 
     async def status(self, timeout):
-        res = await self.session.get(self.base_url + '/status', timeout=timeout)
+        res = await self.session.get(self.url('/status'), timeout=timeout)
         res.raise_for_status()
         status = await res.text()
         if not status:

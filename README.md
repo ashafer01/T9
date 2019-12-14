@@ -70,4 +70,3 @@ python3 -m t9 ~/some/dir/t9.yaml
 export T9_CONFIG_FILE="/opt/my_deployments/t9/config.yaml"
 python3 -m t9
 ```
-

@@ -1,13 +1,13 @@
 version: '2.4'
 volumes:
   t9-home:
-    name: t9-home
+    name: t9-quickstart-home
   t9-irc-bot-config:
-    name: t9-irc-bot-config
+    name: t9-quickstart-irc-bot-config
   t9-exec-server-config:
-    name: t9-exec-server-config
+    name: t9-quickstart-exec-server-config
   t9-postgres-data:
-    name: t9-postgres-data
+    name: t9-quickstart-postgres-data
 services:
   irc:
     container_name: t9-irc

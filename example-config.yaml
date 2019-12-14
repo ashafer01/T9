@@ -16,9 +16,26 @@ nick: 'T9'
 user: 'T9'
 vhost: 'dot'
 realname: 'T9 Anything Bot'
+tls: False
 
 # optional connection password (most servers dont use these)
 #password: ''
+
+# optional TLS configs
+# Note: default system CA certs always included for verifications
+#
+#tls_verify: True
+#
+# A single PEM file containing one or more CA certs for verification
+#tls_ca_file: '/opt/my_deployments/ssl/internal_ca.pem'
+#
+# The CA directory has a very specific filename format required by OpenSSL
+# Using this is not recommended if you're not familiar with the format
+#tls_ca_directory: '/opt/my_deployments/ssl/ca_certs'
+
+# optional TLS client certificate configs
+#tls_client_cert: '/opt/my_deployments/t9/irc_cert.pem'
+#tls_client_private_key: '/opt/my_deployments/t9/irc_key.pem'
 
 # required - URL for the T9 exec server endpoint
 exec_server_base_url: 'http://t9-exec-server:8080'
@@ -60,7 +77,6 @@ dcc_dir: '/media/t9-home-mnt/user'
 # optional secure base directory configs to enable write-locking commands
 # works together with secrets manager
 secure_base: '/home/user/secure'
-rel_secure_base: 'secure'
 
 # db is optional but some features will not work without one
 # keys passed through as keywords to psycopg2.connect()

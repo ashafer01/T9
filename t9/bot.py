@@ -2,6 +2,7 @@ import asyncio
 import logging
 import psycopg2
 import signal
+import ssl
 import traceback
 
 from .commands import Commands
@@ -9,7 +10,6 @@ from .ctcp import CTCP
 from .exceptions import *
 from .irc import irc_reader, EOL, IRCHandler
 from .user_functions import UserFunctions
-from .utils import parse_timelimit
 
 
 async def bot(config):
@@ -18,25 +18,29 @@ async def bot(config):
     # Basic config setup
 
     logger = logging.getLogger(config['nick'])
-
-    config.setdefault('exec_locale', 'C')
-    config.setdefault('exec_python_utf8', True)
-    config.setdefault('ignore', [])
-    config['ignore'] = [nick.lower() for nick in config['ignore']]
-
-    config.setdefault('channels', [])
-    console_channel = config.get('console_channel', '#{nick}-console'.format(**config)).lower()
-    config['console_channel'] = console_channel
-    if console_channel not in config['channels']:
-        config['channels'].append(console_channel)
-
-    config['function_exec_time'] = parse_timelimit(config.get('function_exec_time', '10s'))
-    config['max_exec_time'] = parse_timelimit(config.get('max_exec_time', '1h'))
-    config['default_exec_time'] = parse_timelimit(config.get('default_exec_time', '10s'))
+    logger.debug('Starting up T9 bot')
 
     # Establish connection to IRC
 
-    reader, writer = await asyncio.open_connection(config['host'], config['port'])
+    if config['tls']:
+        ctx = ssl.SSLContext()
+        ctx.set_default_verify_paths()
+        if config['tls_verify']:
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            ctx.check_hostname = True
+        else:
+            ctx.verify_mode = ssl.CERT_NONE
+            ctx.check_hostname = False
+        if config['tls_client_cert']:
+            ctx.load_cert_chain(config['tls_client_cert'], config['tls_client_private_key'])
+        if config['tls_ca_file'] or config['tls_ca_directory']:
+            ctx.load_verify_locations(config['tls_ca_file'], config['tls_ca_directory'])
+        logger.debug('TLS context configured')
+    else:
+        ctx = None
+
+    reader, writer = await asyncio.open_connection(config['host'], config['port'], ssl=ctx)
+    logger.debug('Connected to IRC socket')
 
     def send_line(line: str):
         writer.write(line.encode() + EOL)
@@ -46,7 +50,7 @@ async def bot(config):
 
     functions = UserFunctions(config, send_line)
 
-    if 'db' in config:
+    if config['db']:
         db = psycopg2.connect(**config['db'])
 
         functions.load_from_db(db)
@@ -73,7 +77,7 @@ async def bot(config):
         inv_channel = line.text
 
         # gate the invite
-        invite_allowed = config.get('invite_allowed')
+        invite_allowed = config['invite_allowed']
         if invite_allowed is False:
             logger.info('Invites are disabled')
             return
@@ -108,10 +112,10 @@ async def bot(config):
             logger.warning('Multiple calls to set_up_irc_logging()')
             return
 
-        cfg_console_level = config.get('console_channel_level', 'INFO')
+        cfg_console_level = config['console_channel_level']
         if cfg_console_level:
             level = getattr(logging, cfg_console_level.upper())
-            handler = IRCHandler(writer, console_channel)
+            handler = IRCHandler(writer, config['console_channel'])
             handler.setLevel(level)
             logger.addHandler(handler)
             logger.info('IRC logging online')
@@ -157,10 +161,8 @@ async def bot(config):
 
     # begin IRC handshake
 
-    try:
+    if config['password']:
         send_line('PASS {password}'.format(**config))
-    except KeyError:
-        pass
     send_line('NICK {nick}'.format(**config))
     send_line('USER {user} {vhost} {host} :{realname}'.format(**config))
 

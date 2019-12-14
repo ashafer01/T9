@@ -1,8 +1,12 @@
 import asyncio
+import os.path
 import shlex
 
+from t9_config import parse_time_interval
+
 from .server_exec import ServerExecSession
-from .utils import parse_timelimit, InterfaceComponent, env_var_name_re
+from .components import InterfaceComponent
+from .echo_formatter import EchoFormatter
 
 
 class ExclusiveContainerControl(object):
@@ -107,7 +111,7 @@ class Commands(InterfaceComponent):
         else:
             time_arg = self.config['default_exec_time']
         try:
-            timelimit = parse_timelimit(time_arg)
+            timelimit = parse_time_interval(time_arg)
         except ValueError:
             self.user_log(line)('Invalid time limit for -t')
             return
@@ -118,7 +122,8 @@ class Commands(InterfaceComponent):
 
     async def cmd_echo(self, line, cmd, args):
         """$echo command"""
-        self.send_line(f'PRIVMSG {line.args[0]} :{args.rstrip()}')
+        formatter = EchoFormatter(line)
+        self.respond(line)(formatter.format(args.rstrip()))
 
     async def cmd_apt_get(self, line, cmd, args):
         """$apt-get command"""
@@ -141,13 +146,14 @@ class Commands(InterfaceComponent):
                 self.respond(line)('apk: ' + last_err_line.decode('utf-8'))
 
     async def cmd_inspect(self, line, cmd, args):
+        func_key, func_input, match_obj = self.functions.match_function(args)
         try:
-            func_def = self.functions[args]
+            func_def = self.functions[func_key]
         except KeyError:
-            self.respond(line)(f'Function "{args}" does not exist')
+            self.respond(line)(f'No function matches "{args}"')
             return
-        self.respond(line)('{func_name} <{func}> {func_data} '
-                           '\x0311-!-\x03 set by {setter_nick} on {set_time}'.format(func_name=args, **func_def))
+        self.respond(line)('{trigger} <{func}> {func_data} '
+                           '\x0311-!-\x03 set by {setter_nick} on {set_time}'.format(trigger=func_key, **func_def))
 
     async def cmd_restart(self, line, cmd, args):
         """Command to restart the exec server.
@@ -187,17 +193,14 @@ class Commands(InterfaceComponent):
         if not self.db:
             self.logger.error('Database required for $ro/$rw')
             return
-        try:
-            self.config['secure_base']
-            self.config['rel_secure_base']
-        except KeyError:
-            self.logger.error('secure_base/rel_secure_base config required for $ro/$rw')
+        if not self.config['secure_base']:
+            self.logger.error('secure_base config required for $ro/$rw')
             return
 
         async with self.exclusive_container_control:
             self.logger.info(f'Now have exclusive container control for ${cmd}')
 
-            prefix = self.config['rel_secure_base'].rstrip('/') + '/'
+            prefix = os.path.basename(self.config['secure_base'].rstrip('/')) + '/'
             if args.startswith(prefix):
                 args = args[len(prefix):]
 
@@ -290,7 +293,7 @@ class Commands(InterfaceComponent):
             except IndexError:
                 self.respond(line)(f'Missing parameter, usage: {set_usage}')
                 return
-            if not env_var_name_re.match(var_name) or var_name.upper().startswith('T9_'):
+            if not self.is_valid_env_var(var_name):
                 self.respond(line)('Environment variable name must 1) be 4-32 characters 2) only contain letters, numbers, and underscores 3) start with a letter 4) not start with T9_')
                 return
             self.logger.info(f'Setting secret value for {line.handle.nick}')

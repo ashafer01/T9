@@ -1,13 +1,45 @@
+##
+## build
+##
+
+FROM alpine:latest AS build
+
+WORKDIR /tmp
+RUN apk --no-cache add python3 python3-dev gcc musl-dev \
+ && easy_install-3.7 pip \
+ && pip install --upgrade pip wheel \
+ && pip download regex \
+ && tar -xzvf regex-*.tar.gz \
+ && cd regex-* \
+ && tail -n+2 setup.py > setup.tmp \
+ && echo "from setuptools import setup" > setup.py \
+ && echo "from distutils.core import Extension" >> setup.py \
+ && cat setup.tmp >> setup.py \
+ && rm setup.tmp \
+ && python3 setup.py bdist_wheel
+
+LABEL t9.image=build-t9-base-image
+
+
+##
+## main image
+##
+
 FROM alpine:latest
 
 RUN mkdir /etc/t9
 VOLUME /etc/t9
+COPY --from=build /tmp/regex-*/dist/regex-*.whl /tmp/
 RUN apk --no-cache add \
     python3 \
     py3-psycopg2 \
     py3-multidict \
+    py3-yaml \
+    py3-yarl \
  && ln -s /usr/bin/python3 /usr/bin/python \
  && easy_install-3.7 pip \
- && pip install --upgrade pip
+ && pip install --upgrade pip \
+ && pip install /tmp/regex-*.whl \
+ && rm /tmp/regex-*.whl
 
 LABEL t9.image=t9-base-image

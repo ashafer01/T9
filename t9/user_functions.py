@@ -1,12 +1,13 @@
 import asyncio
-import re
+import regex as re
 import shlex
 from collections import deque
 from datetime import datetime
 
+from .echo_formatter import EchoFormatter
 from .exceptions import *
 from .server_exec import ServerExecSession
-from .utils import InterfaceComponent, env_var_name_re
+from .components import InterfaceComponent
 
 
 class UserFunctions(InterfaceComponent):
@@ -40,6 +41,7 @@ class UserFunctions(InterfaceComponent):
 
     def persist_function_def(self, new_func_name, new_parent_func, new_func_data, nick):
         if self.db:
+            self.logger.debug(f'Storing function {new_func_name} in db')
             with self.db.cursor() as dbc:
                 dbc.execute('INSERT INTO funcs (func_name, parent_func, func_data, setter_nick) '
                             'VALUES (%(func_name)s, %(parent_func)s, %(func_data)s, %(nick)s) '
@@ -55,23 +57,29 @@ class UserFunctions(InterfaceComponent):
                                 'nick': nick,
                             })
                 self.db.commit()
+        else:
+            self.logger.debug(f'No database configured -- {new_func_name} will not be persisted')
 
     def try_define_function(self, line):
-        define_allowed = not self.config.get('define_functions_in_t9_channels_only') or self.t9_chan(line.args[0])
+        define_allowed = not self.config['define_functions_in_t9_channels_only'] or self.t9_chan(line.args[0])
         m = self.function_set_re.match(line.text)
         if m and define_allowed and (m.group(1) or self.t9_chan(line.args[0])):
-            new_func_name = m.group(2).strip()
-            if not new_func_name:
+            new_func_trigger = m.group(2).strip()
+            if not new_func_trigger:
                 return
-            if new_func_name.endswith(' is'):
-                new_func_name = new_func_name[:-3]
-            if new_func_name.lower() == 'exec':
-                self.logger.info(f'Not setting function {new_func_name} - name is reserved')
+            if new_func_trigger.endswith(' is'):
+                new_func_trigger = new_func_trigger[:-3]
+            if new_func_trigger.lower() == 'exec':
+                self.respond(line)(f'Not setting function {new_func_trigger} - name is reserved')
                 return
-            self.logger.info(f'Setting new function {new_func_name}')
             new_parent_func = m.group(3).strip()
             new_func_data = m.group(4)
-            self.persist_function_def(new_func_name,
+            if not new_parent_func[0] in self.config['primitive_leaders'] and not self.match_function(new_parent_func):
+                self.respond(line)('No match for parent function')
+                return
+
+            self.logger.debug(f'Starting to store definition for function {new_func_trigger}')
+            self.persist_function_def(new_func_trigger,
                                       new_parent_func,
                                       new_func_data,
                                       line.handle.nick)
@@ -81,8 +89,9 @@ class UserFunctions(InterfaceComponent):
                 'setter_nick': line.handle.nick,
                 'set_time': datetime.now(),
             }
-            self.functions[new_func_name] = new_func_def
+            self.functions[new_func_trigger] = new_func_def
             self.update_sorted_names()
+            self.respond(line)(f'Set new function {new_func_trigger}')
             return new_func_def
         else:
             return False
@@ -129,54 +138,83 @@ class UserFunctions(InterfaceComponent):
         else:
             await self.run_match_function(line, line.text)
 
-    def delete_function(self, func_name, respond=None):
-        # TODO use match_function on func_name
+    def delete_function(self, del_input, respond=None):
         if respond is None:
             respond = self.logger.info
+
+        m = self.match_function(del_input)
+        if not m:
+            respond(f'No function matches "{del_input}"')
+            return
+
+        func_key, func_input, match_obj = m
+
+        try:
+            del self.functions[func_key]
+            self.update_sorted_names()
+            self.logger.debug(f'Deleted local function "{func_key}"')
+        except KeyError:
+            self.logger.error(f'KeyError while deleting function "{func_key}"')
+            respond("Well, it shouldn't bother you any more ...")
+            return
+
         if self.db:
             with self.db.cursor() as dbc:
-                dbc.execute('DELETE FROM funcs WHERE func_name=%s', (func_name,))
+                dbc.execute('DELETE FROM funcs WHERE func_name=%s', (func_key,))
                 if dbc.rowcount > 0:
-                    del self.functions[func_name]
-                    self.update_sorted_names()
-                    respond(f'Deleted function "{func_name}"')
+                    self.logger.debug(f'Deleted function from database "{func_key}"')
                 else:
-                    respond(f'No function found with name "{func_name}"')
+                    self.logger.warning(f'"{del_input}" matched function "{func_key}" but no rows deleted from database')
                 self.db.commit()
-        else:
-            self.logger.debug('No database for $rm')
-            del self.functions[func_name]
-            self.update_sorted_names()
-            respond(f'Deleted function "{func_name}"')
 
-    async def run_function(self, line, func_name, func_input='', regex_match=None, stack=None):
+        respond(f'Deleted function "{func_key}"')
+
+    async def run_function(self, line, func_key, func_input='', regex_match=None, stack=None):
         """Run a user-defined function"""
         if stack is None:
             stack = deque()
 
-        stack_limit = self.config.get('stack_limit', 4)
+        stack_limit = self.config['stack_limit']
         if len(stack) > stack_limit:
             self.logger.info(f'Exceeded stack limit of {stack_limit}')
             return
-        if func_name[0] in self.config['primitive_leaders']:
+        if func_key[0] in self.config['primitive_leaders']:
             func_data = stack[0][1]
-            await self.run_primitive(line, func_name[1:], func_data, func_input, regex_match, stack)
+            await self.run_primitive(line, func_key[1:], func_data, func_input, regex_match, stack)
         else:
-            func_def = self.functions[func_name]
-            parent_func_name = func_def['func']
-            parent_func_data = func_def['func_data']
-            stack.appendleft((func_name, parent_func_data))
-            self.logger.debug(f'Running parent function "{parent_func_name}" for function "{func_name}"')
-            await self.run_function(line, parent_func_name, func_input, regex_match, stack)
+            func_def = self.functions[func_key]
+
+            if func_def['func'][0] in self.config['primitive_leaders']:
+                parent_func_key = func_def['func']
+            else:
+                m = self.match_function(func_def['func'])
+                if not m:
+                    self.logger.warning(f'No function matches parent <{func_def["func"]}>')
+                    return
+
+                parent_func_key, parent_func_input, parent_match_obj = m
+                if parent_func_input:
+                    func_input = parent_func_input
+                if parent_match_obj:
+                    regex_match = parent_match_obj
+
+            stack.appendleft((func_key, func_def['func_data']))
+
+            self.logger.debug(f'Running parent function "{parent_func_key}" for function "{func_key}"')
+            await self.run_function(line, parent_func_key, func_input, regex_match, stack)
 
     async def run_primitive(self, line, cmd, args, func_input, regex_match, stack):
         """This defines the names of built-in primitive functions"""
         if cmd == 'exec':
             await self.exec(line, args, func_input, stack, regex_match=regex_match)
         elif cmd == 'echo':
-            self.respond(line)(args.rstrip())
+            self.echo(line, args, func_input, stack, regex_match)
         else:
             raise BuiltinNotFoundError(cmd)
+
+    def echo(self, line, echo_fmt, func_input, stack, regex_match):
+        formatter = EchoFormatter(line, func_input, stack, regex_match)
+        self.respond(line)(formatter.format(echo_fmt))
 
     @staticmethod
     def _regex_env_vars(regex_match, env: dict):
@@ -184,10 +222,16 @@ class UserFunctions(InterfaceComponent):
             return
 
         env['T9_MATCH_0'] = regex_match.group(0)
+        for i, cap_str in enumerate(regex_match.captures(0)):
+            env[f"T9_MATCH_CAPTURE_0_{i}"] = cap_str
         for i, group_str in enumerate(regex_match.groups(default='')):
             env[f"T9_MATCH_{i + 1}"] = group_str
+            for j, cap_str in enumerate(regex_match.captures(i)):
+                env[f"T9_MATCH_CAPTURE_{i + 1}_{j}"] = cap_str
         for name, group_str in regex_match.groupdict(default='').items():
             env[f"T9_MATCH_{name}"] = group_str
+            for i, cap_str in enumerate(regex_match.captures(name)):
+                env[f"T9_MATCH_CAPTURE_{name}_{i}"] = cap_str
 
     @staticmethod
     def _stack_env_vars(stack, env: dict):
@@ -227,14 +271,14 @@ class UserFunctions(InterfaceComponent):
             dbc.execute("SELECT env_var, secret FROM secrets WHERE owner_nick=%s",
                         (func_setter,))
             for env_var, secret in dbc:
-                if env_var_name_re.match(env_var) and not env_var.upper().startswith('T9_'):
+                if self.is_valid_env_var(env_var):
                     env[env_var] = secret
                     self.logger.debug(f'Injecting secret ${env_var} for {func_setter}')
                 else:
                     self.logger.debug('Invalid env_var name stored in database!')
 
     def _user_db_env_vars(self, env: dict):
-        if 'user_db' not in self.config:
+        if not self.config['user_db']:
             return
         dsn = []
         have_manual_dsn = False
@@ -250,7 +294,7 @@ class UserFunctions(InterfaceComponent):
             dsn = ' '.join(dsn)
             env['T9_DB_DSN'] = dsn
 
-    async def exec(self, line, func_data, param='', stack=None, timelimit=None, regex_match=None):
+    async def exec(self, line, func_data, func_input='', stack=None, timelimit=None, regex_match=None):
         """The main thing T9 does - exec user input on a container"""
         if timelimit is None:
             timelimit = self.config['function_exec_time']
@@ -277,7 +321,7 @@ class UserFunctions(InterfaceComponent):
             'LC_ALL': exec_locale,
             'LANG': exec_locale,
             'T9_FUNC': called_as,
-            'T9_INPUT': param,
+            'T9_INPUT': func_input,
             'T9_NICK': line.handle.nick,
             'T9_USER': line.handle.user,
             'T9_VHOST': line.handle.host,
