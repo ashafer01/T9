@@ -139,7 +139,7 @@ class Commands(InterfaceComponent):
             cmd_args = shlex.split(args)
             self.user_log(line)('Running apk ...')
             async with ServerExecSession(self.config) as server:
-                status, stdout, stderr = server.exec(args=['apk', *cmd_args])
+                status, stdout, stderr = await server.exec(args=['/sbin/apk', *cmd_args])
             self.respond(line)(f'apk exited {status}')
             if status != 0:
                 last_err_line = stderr.splitlines()[-1]

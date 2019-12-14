@@ -40,13 +40,16 @@ class ServerExecSession(Component):
             params['WorkingDir'] = cwd
         if timeout:
             params['Timeout'] = timeout  # server-side timeout -- actual exec time limit
+            client_timeout = timeout + 3  # client-side timeout with tolerance for transmission delay, etc.
+        else:
+            client_timeout = None
 
         exec_url = self.url('/exec')
         self.logger.debug(f'Sending exec request to {exec_url} {repr(params)}')
         res = await self.session.post(
             exec_url,
             json=params,
-            timeout=timeout+3,  # client-side timeout with tolerance for transmission delay, etc.
+            timeout=client_timeout,
         )
         res.raise_for_status()
         exc_status, status, stdout, stderr = self.unpack_output(await res.read())
