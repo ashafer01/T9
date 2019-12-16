@@ -5,6 +5,7 @@ import signal
 import ssl
 import traceback
 
+from .channels import Channels
 from .commands import Commands
 from .ctcp import CTCP
 from .exceptions import *
@@ -46,72 +47,26 @@ async def bot(config):
         writer.write(line.encode() + EOL)
         logger.info(f'=> {line}')
 
-    # set up resources
+    # set up components and resources
 
+    channels = Channels(config, send_line)
     functions = UserFunctions(config, send_line)
+    ctcp = CTCP(config, send_line)
 
     if config['db']:
         db = psycopg2.connect(**config['db'])
-
         functions.load_from_db(db)
-
-        with db.cursor() as dbc:
-            dbc.execute('SELECT channel FROM chans')
-            for channel, in dbc:
-                if channel not in config['channels']:
-                    config['channels'].append(channel)
+        channels.load_from_db(db)
     else:
         db = None
 
-    handshake_done = False
     sync_lock = asyncio.Lock()
     commands = Commands(config, send_line, db, functions, sync_lock)
-    ctcp = CTCP(config, send_line)
+    handshake_done = False
 
     # functions
 
-    def is_ignored(line):
-        return line.handle.nick.lower() in config['ignore']
-
-    async def handle_invite(line):
-        inv_channel = line.text
-
-        # gate the invite
-        invite_allowed = config['invite_allowed']
-        if invite_allowed is False:
-            logger.info('Invites are disabled')
-            return
-        elif not invite_allowed:
-            # invites open to everyone except global ignores
-            if is_ignored(line):
-                logger.debug(f'Ignoring {line.handle.nick} (invite)')
-                return
-        else:
-            # invites restricted
-            if line.handle.nick not in invite_allowed:
-                logger.warning(f'Invitation to {inv_channel} from {line.handle.nick} not allowed')
-                return
-
-        # join the channel
-        if inv_channel not in config['channels']:
-            if db:
-                with db.cursor() as dbc:
-                    dbc.execute('INSERT INTO chans (channel) VALUES (%s)', (inv_channel,))
-                    db.commit()
-            config['channels'].append(inv_channel)
-            send_line(f'JOIN {line.text}')
-        else:
-            logger.info(f'Already joined to {inv_channel} ignoring invite')
-
-    def join_channels():
-        for channel in config['channels']:
-            send_line(f'JOIN {channel}')
-
     def set_up_irc_logging():
-        if handshake_done:
-            logger.warning('Multiple calls to set_up_irc_logging()')
-            return
-
         cfg_console_level = config['console_channel_level']
         if cfg_console_level:
             level = getattr(logging, cfg_console_level.upper())
@@ -122,38 +77,69 @@ async def bot(config):
         else:
             logger.info('IRC logging disabled, see `console_channel_level` config option')
 
-    async def handle_line(line):
-        logger.debug(f'<= {line}')
-        if line.cmd == 'ERROR':
-            raise FatalError('Got ERROR from server')
-        elif line.cmd == 'PING':
-            send_line(f'PONG :{line.text}')
-        elif line.cmd == 'MODE':
-            if line.args == [config['nick']] and not handshake_done:
-                # finish the handshake after the first self-usermode that we get
-                join_channels()
-                set_up_irc_logging()
-                return True  # indicate handshake is done
-        elif line.cmd == 'INVITE':
-            await handle_invite(line)
-        elif line.cmd == 'PRIVMSG':
-            if is_ignored(line):
-                logger.debug(f'Ignoring {line.handle.nick} (privmsg)')
+    async def handshake_async():
+        await channels.handshake_joins()
+        set_up_irc_logging()
+
+    def finish_handshake():
+        if handshake_done:
+            logger.warning('Multiple calls to finish_handshake()')
+            return
+
+        for line in config['extra_handshake']:
+            send_line(line)
+        asyncio.create_task(handshake_async())
+
+    async def handle_privmsg(line):
+        if channels.is_ignored(line):
+            logger.debug(f'Ignoring {line.handle.nick} (PRIVMSG)')
+            return
+        if not line.text:
+            logger.debug('Message text is empty')
+            return
+        if len(line.args) > 1:
+            logger.warning('Ignoring multi-target PRIVMSG')
+            return
+        if channels.is_channel(line.args[0]) and not channels.is_joined(line.args[0]):
+            if config['passive_join']:
+                channels.passive_join(line.args[0])
+            else:
+                logger.warning('Ignoring PRIVMSG for non-joined channel')
                 return
 
-            if commands.command_candidate(line):
-                await commands.handle_line(line)
-            elif ctcp.ctcp_candidate(line):
-                await ctcp.handle_line(line)
-            else:
-                await functions.handle_line(line)
+        # only one component may handle a privmsg
+        if commands.command_candidate(line):
+            await commands.handle_privmsg(line)
+        elif ctcp.ctcp_candidate(line):
+            await ctcp.handle_privmsg(line)
+        else:
+            await functions.handle_privmsg(line)
 
-    async def safe_await(aw, cls=Exception):
+    async def handle_line(line):
         try:
-            ret = await aw
+            logger.debug(f'<= {line}')
+            if line.cmd == 'ERROR':
+                raise FatalError('Got ERROR from server')
+            elif line.cmd == 'PING':
+                send_line(f'PONG :{line.text}')
+            elif line.cmd == 'MODE':
+                # finish the handshake after the first self-usermode that we get
+                if line.args == [config['nick']] and not handshake_done:
+                    finish_handshake()
+                    return True  # indicate handshake is done
+            elif line.cmd.isdigit():
+                # Server numeric replies
+                # These get dispatched to all components that handle them
+                # (so far just Channels)
+                await channels.handle_numeric(line)
+            elif line.cmd == 'INVITE':
+                await channels.handle_invite(line)
+            elif line.cmd == 'KICK':
+                await channels.handle_kick(line)
+            elif line.cmd == 'PRIVMSG':
+                await handle_privmsg(line)
             await writer.drain()
-            return ret
-        except cls as e:
+        except Exception as e:
             e_str = str(e).splitlines()[0]
             logger.error(f'Uncaught exception: {e.__class__.__name__}: {e_str}')
             logger.debug('\n' + ''.join(traceback.format_tb(e.__traceback__)))
@@ -185,7 +171,7 @@ async def bot(config):
         await sync_lock.acquire()
         sync_lock.release()
 
-        line_coro = safe_await(handle_line(line_obj))
+        line_coro = handle_line(line_obj)
         if not handshake_done:
             # handle lines synchronously until the handshake is complete
             handshake_done = await line_coro

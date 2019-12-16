@@ -1,6 +1,13 @@
 from dataschema import Type, TypeSpec, IterSpec, DictSpec, Reference
 from .utils import parse_time_interval
 
+lowercase_string_list = IterSpec(Type(str, lambda s: s.lower()))
+optional_lowercase_string_list = lowercase_string_list.copy(optional=True, default=list)
+optional_string = TypeSpec((str, None))
+optional_bool_default_true = TypeSpec((bool, None), default=True)
+
+internal_leaders = optional_string.copy(default='$')
+
 db_schema = DictSpec({str: (str, int)}, optional=True)
 
 exec_time_schema = TypeSpec(
@@ -9,14 +16,20 @@ exec_time_schema = TypeSpec(
     default='10s',
 )
 
-internal_leaders = TypeSpec(
-    types=(str, None),
-    default='$',
+extra_handshake_schema = TypeSpec(
+    types=(
+        IterSpec(str),
+        Type(str, lambda s: [s]),
+        False,
+        None,
+    ),
+    constraints=(
+        lambda l: all([1 < len(s) <= 380 for s in l]),
+        'Extra handshake lines must be 1-380 characters'
+    ),
+    is_unset=lambda v: not v,
+    default=list
 )
-
-lowercase_string_list = IterSpec(Type(str, lambda s: s.lower()))
-optional_lowercase_string_list = lowercase_string_list.copy(optional=True, default=list)
-optional_string = TypeSpec((str, None))
 
 config_schema = DictSpec(
     schema={
@@ -27,30 +40,30 @@ config_schema = DictSpec(
             default=6667,
         ),
         "tls": bool,
-        "tls_verify": TypeSpec((bool, None), default=True),
+        "tls_verify": optional_bool_default_true,
         "tls_ca_file": optional_string,
         "tls_ca_directory": optional_string,
         "tls_client_cert": optional_string,
         "tls_client_private_key": optional_string,
         "password": optional_string,
+        "extra_handshake": extra_handshake_schema,
         "nick": str,
         "user": str,
         "vhost": str,
         "realname": str,
         "exec_server_base_url": str,
         "help": str,
-        "console_channel": optional_string,
+        "console_channel": TypeSpec((Type(str, lambda s: s.lower()), None)),
         "console_channel_level": TypeSpec(
             types=(str, False, None),
             default='INFO',
         ),
         "channels": optional_lowercase_string_list,
+        "passive_join": optional_bool_default_true,
         "primitive_leaders": internal_leaders,
         "command_leaders": internal_leaders,
-        "user_leaders": TypeSpec(
-            types=(str, None),
-            default='!.;',
-        ),
+        "user_leaders": optional_string.copy(default='!.;'),
+        "channel_leaders": optional_string.copy(default='#&'),
         "dcc_max_size": TypeSpec(
             types=(int, None),
             constraints=(lambda v: v > 512, 'Must be larger than IRC message'),
@@ -92,8 +105,8 @@ config_schema = DictSpec(
     references=(
         ("console_channel", Reference(
             update=(lambda cfg, console_channel: not console_channel,
-                    lambda cfg, _: '#{nick}-console'.format(**cfg)),
-            test=(lambda cfg, console_channel: console_channel.startswith('#{nick}-'.format(**cfg)),
+                    lambda cfg, _: '#{nick}-console'.format(**cfg).lower()),
+            test=(lambda cfg, console_channel: console_channel.lower().startswith('#{nick}-'.format(**cfg).lower()),
                   'Console channel must begin with configured nickname'),
         )),
         ("channels", Reference(

@@ -51,7 +51,7 @@ class Commands(InterfaceComponent):
             await cmd_func(line, cmd, args)
             return True
 
-    async def handle_line(self, line):
+    async def handle_privmsg(self, line):
         """Run a built-in command"""
 
         if line.text[0] not in self.config['command_leaders']:
@@ -65,13 +65,13 @@ class Commands(InterfaceComponent):
             args = ''
 
         # Channel commands
-        if line.args[0].startswith('#'):
+        if self.is_channel(line.args[0]):
             # Try public command
             if await self._find_run_cmd('public_cmd_', line, cmd, args):
                 return
 
             # gate t9 console/playground channel
-            if not self.t9_chan(line.args[0]):
+            if not self.is_t9_chan(line.args[0]):
                 self.logger.warn('Ignoring possible command in non-playground channel')
                 return
 

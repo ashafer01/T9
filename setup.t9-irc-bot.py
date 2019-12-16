@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='t9-irc-bot',
-    version='0.3.0',
+    version='0.3.1',
     author='Alex Shafer',
     author_email='ashafer@pm.me',
     url='https://github.com/ashafer01/t9',

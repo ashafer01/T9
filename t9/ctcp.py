@@ -10,7 +10,7 @@ class CTCP(InterfaceComponent):
     def ctcp_candidate(line):
         return line.text.startswith('\x01') and line.text.endswith('\x01')
 
-    async def handle_line(self, line):
+    async def handle_privmsg(self, line):
         # got CTCP
         ctcp_args = shlex.split(line.text.strip('\x01'))
         ctcp_cmd = ctcp_args[0].upper()

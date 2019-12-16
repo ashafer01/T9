@@ -61,9 +61,9 @@ class UserFunctions(InterfaceComponent):
             self.logger.debug(f'No database configured -- {new_func_name} will not be persisted')
 
     def try_define_function(self, line):
-        define_allowed = not self.config['define_functions_in_t9_channels_only'] or self.t9_chan(line.args[0])
+        define_allowed = not self.config['define_functions_in_t9_channels_only'] or self.is_t9_chan(line.args[0])
         m = self.function_set_re.match(line.text)
-        if m and define_allowed and (m.group(1) or self.t9_chan(line.args[0])):
+        if m and define_allowed and (m.group(1) or self.is_t9_chan(line.args[0])):
             new_func_trigger = m.group(2).strip()
             if not new_func_trigger:
                 return
@@ -132,7 +132,7 @@ class UserFunctions(InterfaceComponent):
         else:
             self.logger.debug('No matched function')
 
-    async def handle_line(self, line):
+    async def handle_privmsg(self, line):
         if self.try_define_function(line):
             self.logger.debug('Successfully defined function')
         else:
@@ -257,7 +257,7 @@ class UserFunctions(InterfaceComponent):
                 func_setter = func_def['setter_nick']
             else:
                 # called as command
-                if self.t9_chan(line.args[0]):
+                if self.is_t9_chan(line.args[0]):
                     func_setter = line.handle.nick
                 else:
                     self.logger.debug('exec call from non-t9 chan!')

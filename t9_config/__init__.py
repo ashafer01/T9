@@ -110,6 +110,7 @@ _env_map = (
     ('T9_CONFIG_PRIMITIVE_LEADERS', 'primitive_leaders'),
     ('T9_CONFIG_COMMAND_LEADERS', 'command_leaders'),
     ('T9_CONFIG_USER_LEADERS', 'user_leaders'),
+    ('T9_CONFIG_CHANNEL_LEADERS', 'channel_leaders'),
     ('T9_CONFIG_PASTEBIN_FUNCTION', 'pastebin_function'),
     ('T9_CONFIG_DCC_MAX_SIZE', 'dcc_max_size'),
     ('T9_CONFIG_DCC_DIR', 'dcc_dir'),
@@ -124,6 +125,7 @@ _env_map = (
     ('T9_CONFIG_TLS_CA_DIRECTORY', 'tls_ca_directory'),
     ('T9_CONFIG_TLS_CLIENT_CERT', 'tls_client_cert'),
     ('T9_CONFIG_TLS_CLIENT_PRIVATE_KEY', 'tls_client_private_key'),
+    ('T9_CONFIG_EXTRA_HANDSHAKE', 'extra_handshake'),
 )
 
 
@@ -141,6 +143,7 @@ _env_map_bools = (
     ('T9_CONFIG_EXEC_PYTHON_UTF8', 'exec_python_utf8'),
     ('T9_CONFIG_TLS', 'tls'),
     ('T9_CONFIG_TLS_VERIFY', 'tls_verify'),
+    ('T9_CONFIG_PASSIVE_JOIN', 'passive_join'),
 )
 
 

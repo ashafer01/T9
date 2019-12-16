@@ -37,6 +37,11 @@ tls: False
 #tls_client_cert: '/opt/my_deployments/t9/irc_cert.pem'
 #tls_client_private_key: '/opt/my_deployments/t9/irc_key.pem'
 
+# optional - extra handshake protocol lines
+# additional protocol lines to send during the handshake, after registration and before channel joins
+#extra_handshake:
+#  - PRIVMSG NickServ :IDENTIFY mynickservpassword
+
 # required - URL for the T9 exec server endpoint
 exec_server_base_url: 'http://t9-exec-server:8080'
 
@@ -57,11 +62,14 @@ channels:
 # required string to return for help commands
 help: "https://github.com/ashafer01/T9/wiki/T9-User-Docs"
 
-# required leader characters for various purposes, can specify multiple
-# equivalent options
+# required leader characters for various purposes, can specify multiple equivalent options
 primitive_leaders: '$'
 command_leaders: '$'
 user_leaders: '!.;'
+
+# this covers nearly all IRC servers and should rarely be changed
+# identifies the target of a message as being a channel vs. a private message
+channel_leaders: '#&'
 
 # optional pastebin function that accepts a single string as an argument
 # and returns a web URL showing the full string ideally in monospace font
@@ -115,6 +123,10 @@ invite_allowed: []
 
 # only allow function definitions in T9 channels
 define_functions_in_t9_channels_only: False
+
+# if we get a message for a channel we are not joined to, mark it joined thereafter
+# This allows SVSJOIN to work as expected but may be unwanted in some cases
+passive_join: True
 
 
 # exec limits - all optional configs

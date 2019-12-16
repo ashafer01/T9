@@ -10,6 +10,18 @@ class Component(object):
         self.config = config
         self.logger = logging.getLogger(config['nick'])
 
+    def is_ignored(self, line):
+        return line.handle.nick.lower() in self.config['ignore']
+
+    def is_t9_chan(self, channel):
+        return channel.lower().startswith('#' + self.config['nick'].lower() + '-')
+
+    def is_console_channel(self, channel):
+        return channel.lower() == self.config['console_channel']
+
+    def is_channel(self, value):
+        return value[0] in self.config['channel_leaders']
+
 
 class InterfaceComponent(Component):
     def __init__(self, config, send_line):
@@ -35,17 +47,13 @@ class InterfaceComponent(Component):
         else:
             return False
 
-    def t9_chan(self, channel):
-        return channel.lower().startswith('#' + self.config['nick'].lower() + '-')
-
     def user_log(self, line):
         line_chan = line.args[0].lower()
-        if line_chan.startswith('#'):
-            if self.t9_chan(line_chan) and line_chan != self.config['console_channel']:
-                def user_log(msg):
-                    self.send_line(f'PRIVMSG {line_chan} :{msg}')
-            else:
-                user_log = self.logger.info
+        if self.is_t9_chan(line_chan) and not self.is_console_channel(line_chan):
+            def user_log(msg):
+                self.send_line(f'PRIVMSG {line_chan} :{msg}')
+        elif self.is_channel(line_chan):
+            user_log = self.logger.info
         else:
             def user_log(msg):
                 self.send_line(f'PRIVMSG {line.handle.nick} :{msg}')
@@ -53,9 +61,9 @@ class InterfaceComponent(Component):
 
     def respond(self, line):
         line_chan = line.args[0].lower()
-        if line_chan == self.config['console_channel']:
+        if self.is_console_channel(line_chan):
             respond = self.logger.info
-        elif line_chan.startswith('#'):
+        elif self.is_channel(line_chan):
             def respond(msg):
                 self.send_line(f'PRIVMSG {line_chan} :{msg}')
         else:
