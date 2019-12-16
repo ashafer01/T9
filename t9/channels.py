@@ -92,6 +92,9 @@ class Channels(Component):
 
         channel = line.args[1].lower()
 
+        if self.is_joined(channel):
+            return
+
         if line.cmd in JOIN_SUCCESS_NUMERICS:
             self._join_success(channel)
             self.logger.info(f'Successfully joined channel {channel} ({line.cmd})')
