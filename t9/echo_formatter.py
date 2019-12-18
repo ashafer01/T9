@@ -9,7 +9,7 @@ class EchoFormatter(string.Formatter):
             stack = []
 
         if regex_match:
-            matches = {'0': regex_match.group(0)}
+            matches = {0: regex_match.group(0)}
             for i, group_str in enumerate(regex_match.groups(default='')):
                 matches[i + 1] = group_str
             for name, group_str in regex_match.groupdict(default='').items():
@@ -45,8 +45,10 @@ class EchoFormatter(string.Formatter):
                         value = self._format_values[field][item]
                     except ValueError:
                         value = self._format_values[field]
-                except (KeyError, IndexError):
+                except KeyError:
                     value = '{UNKNOWN FIELD}'
+                except IndexError:
+                    value = default
 
                 if not value:
                     value = default
