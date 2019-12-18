@@ -214,7 +214,9 @@ class UserFunctions(InterfaceComponent):
 
     def echo(self, line, echo_fmt, func_input, stack, regex_match):
         formatter = EchoFormatter(line, func_input, stack, regex_match)
-        self.respond(line)(formatter.format(echo_fmt))
+        res = formatter.format(echo_fmt)
+        if res:
+            self.respond(line)(res)
 
     @staticmethod
     def _regex_env_vars(regex_match, env: dict):

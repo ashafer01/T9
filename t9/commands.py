@@ -123,7 +123,9 @@ class Commands(InterfaceComponent):
     async def cmd_echo(self, line, cmd, args):
         """$echo command"""
         formatter = EchoFormatter(line)
-        self.respond(line)(formatter.format(args.rstrip()))
+        res = formatter.format(args.rstrip())
+        if res:
+            self.respond(line)(res)
 
     async def cmd_apt_get(self, line, cmd, args):
         """$apt-get command"""
