@@ -45,7 +45,7 @@ class EchoFormatter(string.Formatter):
                         collection = self._format_values[field]
                         try:
                             value = collection[item]
-                        except (KeyError, IndexError):
+                        except LookupError:
                             value = default
                     except ValueError:
                         value = self._format_values[field]
