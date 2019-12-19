@@ -42,13 +42,15 @@ class EchoFormatter(string.Formatter):
                             item = int(item)
                         except ValueError:
                             pass
-                        value = self._format_values[field][item]
+                        collection = self._format_values[field]
+                        try:
+                            value = collection[item]
+                        except (KeyError, IndexError):
+                            value = default
                     except ValueError:
                         value = self._format_values[field]
                 except KeyError:
                     value = '{UNKNOWN FIELD}'
-                except IndexError:
-                    value = default
 
                 if not value:
                     value = default
