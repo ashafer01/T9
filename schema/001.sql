@@ -1,5 +1,8 @@
 -- Schema setup for Postgres
 
+BEGIN;
+INSERT INTO t9_schema (applied) VALUES ('001');
+
 CREATE TABLE funcs (
     func_name text,
     parent_func text,
@@ -21,3 +24,5 @@ CREATE TABLE write_locks (
     file_path text PRIMARY KEY,
     owner_nick varchar(32)
 );
+
+COMMIT;
