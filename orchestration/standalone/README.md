@@ -10,8 +10,10 @@ Also intend as the starting point for anyone who was running T9 prior to 0.2.0
 
 T9 images are not presently pushed to any public Docker repo.
 
-Run `./build_images.sh` in the root of this Git repo to build all images
+Run `./build-images.sh` in the root of this Git repo to build all images
 and give them the expected local tags.
+
+`./clean-images.sh` will destroy all local T9 images.
 
 ## Home Volume
 

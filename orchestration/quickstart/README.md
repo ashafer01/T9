@@ -14,3 +14,6 @@ just use `docker-compose up` from this directory as normal.
 Once docker-compose is running, point your IRC client at `localhost:42667` and join `#T9-console`. Check the
 [user docs](https://github.com/ashafer01/T9/wiki/T9-User-Docs) to learn how to define your first function. You can
 then join `#general` to interact with T9 without seeing log messages.
+
+If you want to totally destroy the quickstart environment including all data, use the
+`clean-quickstart.sh` script in the root of this repo.
