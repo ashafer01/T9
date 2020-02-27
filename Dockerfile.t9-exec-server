@@ -34,6 +34,6 @@ RUN apk --no-cache add bash coreutils
 
 EXPOSE 8080
 
-CMD ["python3", "-m", "t9_exec_server"]
+CMD ["/sbin/tini", "--", "python3", "-m", "t9_exec_server"]
 
 LABEL t9.image=t9-exec-server

@@ -31,6 +31,7 @@ RUN mkdir /etc/t9
 VOLUME /etc/t9
 COPY --from=build /tmp/regex-*/dist/regex-*.whl /tmp/
 RUN apk --no-cache add \
+    tini \
     python3 \
     py3-psycopg2 \
     py3-multidict \

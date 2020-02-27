@@ -28,6 +28,6 @@ RUN rm /tmp/t9-irc-bot-*.tar.gz \
 
 VOLUME /media/t9-home-mnt
 
-CMD ["python3", "-m", "t9"]
+CMD ["/sbin/tini", "--", "python3", "-m", "t9"]
 
 LABEL t9.image=t9-irc-bot
