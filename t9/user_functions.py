@@ -225,9 +225,10 @@ class UserFunctions(InterfaceComponent):
 
         env['T9_MATCH_0'] = regex_match.group(0)
         for i, group_str in enumerate(regex_match.groups(default='')):
-            env[f"T9_MATCH_{i + 1}"] = group_str
-            for j, cap_str in enumerate(regex_match.captures(i + 1)):
-                env[f"T9_MATCH_CAPTURE_{i + 1}_{j}"] = cap_str
+            i += 1  # align with group() semantics
+            env[f"T9_MATCH_{i}"] = group_str
+            for j, cap_str in enumerate(regex_match.captures(i)):
+                env[f"T9_MATCH_CAPTURE_{i}_{j}"] = cap_str
         for name, group_str in regex_match.groupdict(default='').items():
             env[f"T9_MATCH_{name}"] = group_str
             for i, cap_str in enumerate(regex_match.captures(name)):
