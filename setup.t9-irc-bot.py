@@ -17,7 +17,7 @@ setup(
         'pyyaml',
         'psycopg2',
         'aiohttp',
-        'python-dataschema~=0.1.1',
+        'python-dataschema==0.1.4',
         'regex',
     ],
 )

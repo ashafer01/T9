@@ -1,13 +1,15 @@
-from dataschema import Type, TypeSpec, IterSpec, DictSpec, Reference
+import sys
+sys.path.insert(0, '/Users/alex/git/dataschema')
+from dataschema import Type, TypeSpec, IterSpec, DictSpec, Test, Update
 from .utils import parse_time_interval
 
 lowercase_string_list = IterSpec(Type(str, lambda s: s.lower()))
-optional_lowercase_string_list = lowercase_string_list.copy(optional=True, default=list)
+optional_lowercase_string_list = lowercase_string_list(optional=True, default=list)
 optional_string = TypeSpec(str, optional=True)
 optional_bool_default_true = TypeSpec(bool, optional=True, default=True)
 optional_bool_default_false = TypeSpec(bool, optional=True, default=False)
 
-internal_leaders = optional_string.copy(default='$')
+internal_leaders = optional_string(default='$')
 
 db_schema = DictSpec({str: (str, int)}, optional=True)
 
@@ -38,7 +40,7 @@ config_schema = DictSpec(
     schema={
         "host": str,
         "port": TypeSpec(
-            types=(int, Type(str, lambda s: int(s))),
+            types=(int, Type(str, int)),
             constraints=(lambda port: 1 <= port <= 65535, 'Out of port range'),
             optional=True,
             default=6667,
@@ -70,8 +72,8 @@ config_schema = DictSpec(
         "passive_join": optional_bool_default_true,
         "primitive_leaders": internal_leaders,
         "command_leaders": internal_leaders,
-        "user_leaders": optional_string.copy(default='!.;'),
-        "channel_leaders": optional_string.copy(default='#&'),
+        "user_leaders": optional_string(default='!.;'),
+        "channel_leaders": optional_string(default='#&'),
         "dcc_max_size": TypeSpec(
             types=int,
             optional=True,
@@ -93,7 +95,7 @@ config_schema = DictSpec(
         "function_exec_time": exec_time_schema,
         "default_exec_time": exec_time_schema,
         "max_exec_time": exec_time_schema,
-        "exec_locale": optional_string.copy(default='C'),
+        "exec_locale": optional_string(default='C'),
         "exec_python_utf8": optional_bool_default_true,
         "stack_limit": TypeSpec(
             types=int,
@@ -109,20 +111,18 @@ config_schema = DictSpec(
         ),
         "pastebin_function": optional_string,
     },
-    references=(
-        ("console_channel", Reference(
-            update=(lambda cfg, console_channel: not console_channel,
-                    lambda cfg, _: '#{nick}-console'.format(**cfg).lower()),
-            test=(lambda cfg, console_channel: console_channel.startswith('#{nick}-'.format(**cfg).lower()),
-                  'Console channel must begin with configured nickname'),
-        )),
-        ("channels", Reference(
-            update=(lambda cfg, channels: cfg['console_channel'] not in channels,
-                    lambda cfg, channels: [*channels, cfg['console_channel']]),
-        )),
-        ("logging", Reference(
-            test=(lambda cfg, logging: 'loggers' not in logging or cfg['nick'] in logging['loggers'],
-                  'Loggers have been configured but no logger corresponding to the configured nickname is defined'),
-        )),
+    post=(
+        Update('console_channel', 'nick',
+               gate=lambda console_channel, _: not console_channel,
+               update=lambda _, nick: f'#{nick.lower()}-console'),
+        Test('console_channel', 'nick',
+             test=lambda console_channel, nick: console_channel.startswith(f'#{nick.lower()}-'),
+             message='console_channel must begin with configured nick'),
+        Update('channels', 'console_channel',
+               gate=lambda channels, console_channel: console_channel not in channels,
+               update=lambda channels, console_channel: [*channels, console_channel]),
+        Test('logging', 'nick',
+             test=lambda logging, nick: 'loggers' not in logging or nick in logging['loggers'],
+             message='Loggers have been configured but no logger corresponding to the configured nickname is defined')
     ),
 )
